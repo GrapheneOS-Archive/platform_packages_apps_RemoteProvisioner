@@ -25,8 +25,6 @@ import android.security.remoteprovisioning.AttestationPoolStatus;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
 
-import java.lang.System;
-
 /**
  * A class that extends JobService in order to be scheduled to check the status of the attestation
  * key pool at regular intervals. If the job determines that more keys need to be generated and
@@ -38,31 +36,38 @@ public class PeriodicProvisioner extends JobService {
 
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String TAG = "RemoteProvisioningService";
-    private ProvisionerThread p;
+    private ProvisionerThread mProvisionerThread;
 
+    /**
+     * Starts the periodic provisioning job, which will occasionally check the attestation key pool
+     * and provision it as necessary.
+     */
     public boolean onStartJob(JobParameters params) {
         Log.d(TAG, "Starting provisioning job");
-        p = new ProvisionerThread(params);
-        p.start();
+        mProvisionerThread = new ProvisionerThread(params);
+        mProvisionerThread.start();
         return true;
     }
 
+    /**
+     * Allows the job to be stopped if need be.
+     */
     public boolean onStopJob(JobParameters params) {
-        p.stop();
+        mProvisionerThread.stop();
         return false;
     }
 
     private class ProvisionerThread extends Thread {
         private JobParameters mParams;
 
-        public ProvisionerThread(JobParameters params) {
+        ProvisionerThread(JobParameters params) {
             mParams = params;
         }
 
         public void run() {
             try {
                 IRemoteProvisioning binder =
-                    IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
+                        IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
                 // TODO: Replace expiration date parameter with value fetched from server
                 checkAndProvision(binder, 1, SecurityLevel.TRUSTED_ENVIRONMENT);
                 jobFinished(mParams, false /* wantsReschedule */);
@@ -77,8 +82,7 @@ public class PeriodicProvisioner extends JobService {
 
         private void checkAndProvision(IRemoteProvisioning binder, long expiringBy, int secLevel)
                 throws InterruptedException, RemoteException {
-            AttestationPoolStatus pool =
-                binder.getPoolStatus(expiringBy, secLevel);
+            AttestationPoolStatus pool = binder.getPoolStatus(expiringBy, secLevel);
             int generated = 0;
             while (generated + pool.total - pool.expiring < TOTAL_SIGNED_KEYS) {
                 generated++;
