@@ -18,6 +18,7 @@ package com.android.remoteprovisioner;
 
 import android.app.job.JobParameters;
 import android.app.job.JobService;
+import android.hardware.security.keymint.SecurityLevel;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.security.remoteprovisioning.AttestationPoolStatus;
@@ -63,25 +64,30 @@ public class PeriodicProvisioner extends JobService {
                 IRemoteProvisioning binder =
                     IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
                 // TODO: Replace expiration date parameter with value fetched from server
-                AttestationPoolStatus pool =
-                    binder.getPoolStatus(1);
-                int generated = 0;
-                while (generated + pool.total - pool.expiring < TOTAL_SIGNED_KEYS) {
-                    generated++;
-                    binder.generateKeyPair(false /* isTestMode */);
-                    Thread.sleep(5000);
-                }
-                if (generated > 0) {
-                    Log.d(TAG, "Keys generated, moving to provisioning process.");
-                    Provisioner.provisionCerts(generated, binder);
-                }
+                checkAndProvision(binder, 1, SecurityLevel.TRUSTED_ENVIRONMENT);
                 jobFinished(mParams, false /* wantsReschedule */);
             } catch (RemoteException e) {
                 jobFinished(mParams, true /* wantsReschedule */);
-                Log.e(TAG, "Remote exception during provisioning.", e);
+                Log.e(TAG, "Error on the binder side during provisioning.", e);
             } catch (InterruptedException e) {
                 jobFinished(mParams, true /* wantsReschedule */);
                 Log.e(TAG, "Provisioner thread interrupted.", e);
+            }
+        }
+
+        private void checkAndProvision(IRemoteProvisioning binder, long expiringBy, int secLevel)
+                throws InterruptedException, RemoteException {
+            AttestationPoolStatus pool =
+                binder.getPoolStatus(expiringBy, secLevel);
+            int generated = 0;
+            while (generated + pool.total - pool.expiring < TOTAL_SIGNED_KEYS) {
+                generated++;
+                binder.generateKeyPair(false /* isTestMode */, secLevel);
+                Thread.sleep(5000);
+            }
+            if (generated > 0) {
+                Log.d(TAG, "Keys generated, moving to provisioning process.");
+                Provisioner.provisionCerts(generated, secLevel, binder);
             }
         }
     }

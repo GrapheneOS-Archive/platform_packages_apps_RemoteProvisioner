@@ -20,12 +20,15 @@ import com.android.remoteprovisioner.Provisioner;
 
 import android.app.Service;
 import android.content.Intent;
+import android.hardware.security.keymint.SecurityLevel;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.security.remoteprovisioning.AttestationPoolStatus;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
+
+import java.lang.System;
 
 /**
  * Provides the implementation for IGenerateKeyService.aidl
@@ -50,16 +53,22 @@ public class GenerateKeyService extends Service {
             try {
                 IRemoteProvisioning binder =
                         IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
-                AttestationPoolStatus pool =
-                        binder.getPoolStatus(1);
-                if (pool.unassigned == 0) {
-                    binder.generateKeyPair(false /* isTestMode */);
-                    Provisioner.provisionCerts(1 /* numCsr */, binder);
-                } else {
-                    Log.e(TAG, "generateKey() called, but signed certs are available.");
-                }
+                // Iterate through each security level backend
+                checkAndFillPool(binder, SecurityLevel.TRUSTED_ENVIRONMENT);
             } catch (RemoteException e) {
                 Log.e(TAG, "Remote Exception: ", e);
+            }
+        }
+
+        private void checkAndFillPool(IRemoteProvisioning binder, int secLevel)
+                throws RemoteException {
+            AttestationPoolStatus pool =
+                    binder.getPoolStatus(System.currentTimeMillis(), secLevel);
+            if (pool.unassigned == 0) {
+                binder.generateKeyPair(false /* isTestMode */, secLevel);
+                Provisioner.provisionCerts(1 /* numCsr */, secLevel, binder);
+            } else {
+                Log.e(TAG, "generateKey() called, but signed certs are available.");
             }
         }
     };
