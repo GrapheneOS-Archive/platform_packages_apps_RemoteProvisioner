@@ -18,12 +18,13 @@ android_app {
     platform_apis: true,
     privileged: true,
     libs: [
-        "android.system.keystore2-java",
+        "android.system.keystore2-V1-java",
         "framework-annotations-lib",
         "cbor-java",
     ],
     static_libs: [
-        "android.security.remoteprovisioning-java"
+        "android.hardware.security.keymint-V1-java",
+        "android.security.remoteprovisioning-java",
     ],
     resource_dirs: ["res"],
     srcs: ["src/**/*.java",
