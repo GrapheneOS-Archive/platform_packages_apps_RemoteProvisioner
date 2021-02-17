@@ -18,8 +18,13 @@ package com.android.remoteprovisioner;
 
 import android.util.Log;
 
-import co.nstant.in.cbor.*;
-import co.nstant.in.cbor.model.*;
+import co.nstant.in.cbor.CborDecoder;
+import co.nstant.in.cbor.CborEncoder;
+import co.nstant.in.cbor.CborException;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.ByteString;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.MajorType;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -57,35 +62,35 @@ public class CborUtils {
         try {
             ByteArrayInputStream bais = new ByteArrayInputStream(serverResp);
             List<DataItem> dataItems = new CborDecoder(bais).decode();
-            if (dataItems.size() != RESPONSE_ARRAY_SIZE ||
-                    dataItems.get(RESPONSE_CERT_ARRAY_INDEX).getMajorType() != MajorType.ARRAY) {
-                Log.e(TAG, "Improper formatting of CBOR response. Expected size 1. Actual: " +
-                            dataItems.size() + "\nExpected major type: Array. Actual: " +
-                            dataItems.get(0).getMajorType().name());
+            if (dataItems.size() != RESPONSE_ARRAY_SIZE
+                    || dataItems.get(RESPONSE_CERT_ARRAY_INDEX).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "Improper formatting of CBOR response. Expected size 1. Actual: "
+                            + dataItems.size() + "\nExpected major type: Array. Actual: "
+                            + dataItems.get(0).getMajorType().name());
                 return null;
             }
             dataItems = ((Array) dataItems.get(RESPONSE_CERT_ARRAY_INDEX)).getDataItems();
             if (dataItems.size() != CERT_ARRAY_ENTRIES) {
-                Log.e(TAG, "Incorrect number of certificate array entries. Expected: 2. Actual: " +
-                            dataItems.size());
+                Log.e(TAG, "Incorrect number of certificate array entries. Expected: 2. Actual: "
+                            + dataItems.size());
                 return null;
             }
-            if (dataItems.get(SHARED_CERTIFICATES_INDEX).getMajorType() != MajorType.BYTE_STRING ||
-                    dataItems.get(UNIQUE_CERTIFICATES_INDEX).getMajorType() != MajorType.ARRAY) {
-                Log.e(TAG, "Incorrect CBOR types. Expected 'Byte String' and 'Array'. Got: " +
-                            dataItems.get(SHARED_CERTIFICATES_INDEX).getMajorType().name() +
-                            " and " +
-                            dataItems.get(UNIQUE_CERTIFICATES_INDEX).getMajorType().name());
+            if (dataItems.get(SHARED_CERTIFICATES_INDEX).getMajorType() != MajorType.BYTE_STRING
+                    || dataItems.get(UNIQUE_CERTIFICATES_INDEX).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "Incorrect CBOR types. Expected 'Byte String' and 'Array'. Got: "
+                            + dataItems.get(SHARED_CERTIFICATES_INDEX).getMajorType().name()
+                            + " and "
+                            + dataItems.get(UNIQUE_CERTIFICATES_INDEX).getMajorType().name());
                 return null;
             }
             byte[] sharedCertificates =
-                ((ByteString) dataItems.get(SHARED_CERTIFICATES_INDEX)).getBytes();
+                    ((ByteString) dataItems.get(SHARED_CERTIFICATES_INDEX)).getBytes();
             Array uniqueCertificates = (Array) dataItems.get(UNIQUE_CERTIFICATES_INDEX);
             List<byte[]> uniqueCertificateChains = new ArrayList<byte[]>();
             for (DataItem entry : uniqueCertificates.getDataItems()) {
                 if (entry.getMajorType() != MajorType.BYTE_STRING) {
-                    Log.e(TAG, "Incorrect CBOR type. Expected: 'Byte String'. Actual:" +
-                                entry.getMajorType().name());
+                    Log.e(TAG, "Incorrect CBOR type. Expected: 'Byte String'. Actual:"
+                                + entry.getMajorType().name());
                     return null;
                 }
                 ByteArrayOutputStream concat = new ByteArrayOutputStream();
@@ -103,29 +108,33 @@ public class CborUtils {
         return null;
     }
 
+    /**
+     * Parses the Google Endpoint Encryption Key response provided by the server which contains a
+     * Google signed EEK and a challenge for use by the underlying IRemotelyProvisionedComponent HAL
+     */
     public static GeekResponse parseGeekResponse(byte[] serverResp) {
         try {
             ByteArrayInputStream bais = new ByteArrayInputStream(serverResp);
             List<DataItem> dataItems = new CborDecoder(bais).decode();
-            if (dataItems.size() != RESPONSE_ARRAY_SIZE ||
-                    dataItems.get(RESPONSE_CERT_ARRAY_INDEX).getMajorType() != MajorType.ARRAY) {
-                Log.e(TAG, "Improper formatting of CBOR response. Expected size 1. Actual: " +
-                            dataItems.size() + "\nExpected major type: Array. Actual: " +
-                            dataItems.get(0).getMajorType().name());
+            if (dataItems.size() != RESPONSE_ARRAY_SIZE
+                    || dataItems.get(RESPONSE_CERT_ARRAY_INDEX).getMajorType() != MajorType.ARRAY) {
+                Log.e(TAG, "Improper formatting of CBOR response. Expected size 1. Actual: "
+                            + dataItems.size() + "\nExpected major type: Array. Actual: "
+                            + dataItems.get(0).getMajorType().name());
                 return null;
             }
             dataItems = ((Array) dataItems.get(RESPONSE_CERT_ARRAY_INDEX)).getDataItems();
             if (dataItems.size() != EEK_ARRAY_ENTRIES) {
-                Log.e(TAG, "Incorrect number of certificate array entries. Expected: 2. Actual: " +
-                            dataItems.size());
+                Log.e(TAG, "Incorrect number of certificate array entries. Expected: 2. Actual: "
+                            + dataItems.size());
                 return null;
             }
-            if (dataItems.get(EEK_INDEX).getMajorType() != MajorType.ARRAY ||
-                    dataItems.get(CHALLENGE_INDEX).getMajorType() != MajorType.BYTE_STRING) {
-                Log.e(TAG, "Incorrect CBOR types. Expected 'Array' and 'Byte String'. Got: " +
-                            dataItems.get(EEK_INDEX).getMajorType().name() +
-                            " and " +
-                            dataItems.get(CHALLENGE_INDEX).getMajorType().name());
+            if (dataItems.get(EEK_INDEX).getMajorType() != MajorType.ARRAY
+                    || dataItems.get(CHALLENGE_INDEX).getMajorType() != MajorType.BYTE_STRING) {
+                Log.e(TAG, "Incorrect CBOR types. Expected 'Array' and 'Byte String'. Got: "
+                            + dataItems.get(EEK_INDEX).getMajorType().name()
+                            + " and "
+                            + dataItems.get(CHALLENGE_INDEX).getMajorType().name());
                 return null;
             }
             ByteArrayOutputStream baos = new ByteArrayOutputStream();

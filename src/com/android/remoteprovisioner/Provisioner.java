@@ -17,32 +17,25 @@
 package com.android.remoteprovisioner;
 
 import android.annotation.NonNull;
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.hardware.security.keymint.SecurityLevel;
 import android.os.RemoteException;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
 
 import java.io.BufferedInputStream;
-import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.interfaces.ECPublicKey;
-import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.util.List;
+import java.security.interfaces.ECPublicKey;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Provides an easy package to run the provisioning process from start to finish, interfacing
@@ -93,7 +86,7 @@ public class Provisioner {
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
             int read = 0;
-            while((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
+            while ((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
                 cborBytes.write(buffer, 0, read);
             }
             inputStream.close();
@@ -141,7 +134,7 @@ public class Provisioner {
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
             int read = 0;
-            while((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
+            while ((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
                 cborBytes.write(buffer, 0, read);
             }
             return CborUtils.parseSignedCertificates(cborBytes.toByteArray());
@@ -201,7 +194,7 @@ public class Provisioner {
             return false;
         }
         ArrayList<byte[]> certChains =
-            new ArrayList<byte[]>(requestSignedCertificates(payload, geek.challenge));
+                new ArrayList<byte[]>(requestSignedCertificates(payload, geek.challenge));
         for (byte[] certChain : certChains) {
             // DER encoding specifies leaf to root ordering. Pull the public key and expiration
             // date from the leaf.
