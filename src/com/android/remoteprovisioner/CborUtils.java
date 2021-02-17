@@ -89,8 +89,9 @@ public class CborUtils {
                     return null;
                 }
                 ByteArrayOutputStream concat = new ByteArrayOutputStream();
-                concat.write(sharedCertificates);
+                // DER encoding specifies certificate chains ordered from leaf to root.
                 concat.write(((ByteString) entry).getBytes());
+                concat.write(sharedCertificates);
                 uniqueCertificateChains.add(concat.toByteArray());
             }
             return uniqueCertificateChains;
