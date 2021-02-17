@@ -16,8 +16,6 @@
 
 package com.android.remoteprovisioner.service;
 
-import com.android.remoteprovisioner.Provisioner;
-
 import android.app.Service;
 import android.content.Intent;
 import android.hardware.security.keymint.SecurityLevel;
@@ -28,7 +26,7 @@ import android.security.remoteprovisioning.AttestationPoolStatus;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
 
-import java.lang.System;
+import com.android.remoteprovisioner.Provisioner;
 
 /**
  * Provides the implementation for IGenerateKeyService.aidl
@@ -44,10 +42,10 @@ public class GenerateKeyService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
-        return binder;
+        return mBinder;
     }
 
-    private final IGenerateKeyService.Stub binder = new IGenerateKeyService.Stub() {
+    private final IGenerateKeyService.Stub mBinder = new IGenerateKeyService.Stub() {
         @Override
         public void generateKey() {
             try {

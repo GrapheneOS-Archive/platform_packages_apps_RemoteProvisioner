@@ -38,7 +38,7 @@ public class BootReceiver extends BroadcastReceiver {
                 .Builder(1, new ComponentName(context, PeriodicProvisioner.class))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setEstimatedNetworkBytes(1000, 1000)
-                .setPeriodic(1000*60*60*24)
+                .setPeriodic(1000 * 60 * 60 * 24)
                 .build();
         if (((JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE)).schedule(info)
                 != JobScheduler.RESULT_SUCCESS) {
