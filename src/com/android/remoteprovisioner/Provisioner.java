@@ -20,6 +20,7 @@ import android.annotation.NonNull;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.hardware.security.keymint.SecurityLevel;
 import android.os.RemoteException;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
@@ -33,6 +34,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.interfaces.ECPublicKey;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
@@ -40,6 +42,7 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 
 /**
  * Provides an easy package to run the provisioning process from start to finish, interfacing
@@ -53,8 +56,10 @@ public class Provisioner {
             PROVISIONING_URL + "/v1:signCertificates?challenge=";
     private static final String TAG = "RemoteProvisioningService";
 
+    private static final byte ECDSA_UNCOMPRESSED_BYTE = 0x04;
+
     /**
-     * Takes a byte stream composed of PEM encoded certificates and returns the X.509 certificates
+     * Takes a byte array composed of DER encoded certificates and returns the X.509 certificates
      * contained within as an X509Certificate array.
      */
     private static X509Certificate[] formatX509Certs(byte[] certStream)
@@ -163,12 +168,14 @@ public class Provisioner {
      *                     than the number of unsigned attestation key pairs available, it will
      *                     only sign the number that is available at time of calling.
      *
+     * @param secLevel Which KM instance should be used to provision certs.
      * @param binder The IRemoteProvisioning binder interface needed by the method to handle talking
      *                     to the remote provisioning system component.
      *
      * @return True if certificates were successfully provisioned for the signing keys.
      */
-    public static boolean provisionCerts(int numKeys, @NonNull IRemoteProvisioning binder) {
+    public static boolean provisionCerts(int numKeys, int secLevel,
+            @NonNull IRemoteProvisioning binder) {
         if (numKeys < 1) {
             Log.e(TAG, "Request at least 1 key to be signed. Num requested: " + numKeys);
             return false;
@@ -183,7 +190,8 @@ public class Provisioner {
             payload = binder.generateCsr(false /* testMode */,
                     numKeys,
                     geek.geek,
-                    geek.challenge);
+                    geek.challenge,
+                    secLevel);
         } catch (RemoteException e) {
             Log.e(TAG, "Failed to generate CSR blob", e);
             return false;
@@ -194,9 +202,45 @@ public class Provisioner {
         }
         ArrayList<byte[]> certChains =
             new ArrayList<byte[]>(requestSignedCertificates(payload, geek.challenge));
-        // TODO: Fix AIDL here to add a matching scheme, since public key in KeyStore is a CBOR
-        // blob
-        //binder.provisionCertChain();
+        for (byte[] certChain : certChains) {
+            // DER encoding specifies leaf to root ordering. Pull the public key and expiration
+            // date from the leaf.
+            X509Certificate cert;
+            try {
+                cert = formatX509Certs(certChain)[0];
+            } catch (CertificateException e) {
+                Log.e(TAG, "Failed to interpret DER encoded certificate chain", e);
+                return false;
+            }
+            // getTime returns the time in *milliseconds* since the epoch.
+            long expirationDate = cert.getNotAfter().getTime();
+            ECPublicKey key = (ECPublicKey) cert.getPublicKey();
+
+            // Remote key provisioning internally supports the default, uncompressed public key
+            // format for ECDSA. This defines the format as (s | x | y), where s is the byte
+            // indicating if the key is compressed or not, and x and y make up the EC point.
+            // However, the key as stored in a COSE_Key object is just the two points. As such,
+            // the raw public key is stored in the database is (x | y), so the compression byte
+            // should be dropped here.
+            //
+            // s: 1 byte, x: 32 bytes, y: 32 bytes
+            byte[] keyEncoding = key.getEncoded();
+            if (keyEncoding.length != 65) {
+                Log.e(TAG, "Key is not encoded as expected, or corrupted. Length: "
+                        + keyEncoding.length);
+                return false;
+            } else if (keyEncoding[0] != ECDSA_UNCOMPRESSED_BYTE) {
+                Log.e(TAG, "Key is not uncompressed.");
+            }
+            byte[] rawPublicKey = Arrays.copyOfRange(keyEncoding, 1 /* from */, 65 /* to */);
+            try {
+                binder.provisionCertChain(rawPublicKey, certChain, expirationDate, secLevel);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Error on the binder side when attempting to provision the signed chain",
+                        e);
+                return false;
+            }
+        }
         return true;
     }
 }

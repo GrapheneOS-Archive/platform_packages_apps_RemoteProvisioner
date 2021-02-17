@@ -51,7 +51,7 @@ public class CborUtils {
      * @param serverResp The CBOR blob received from the server which contains all signed
      *                      certificate chains.
      *
-     * @return A List object where each byte[] entry is an entire PEM-encoded certificate chain.
+     * @return A List object where each byte[] entry is an entire DER-encoded certificate chain.
      */
     public static List<byte[]> parseSignedCertificates(byte[] serverResp) {
         try {
