@@ -68,6 +68,11 @@ public class PeriodicProvisioner extends JobService {
             try {
                 IRemoteProvisioning binder =
                         IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
+                if (binder == null) {
+                    Log.e(TAG, "Binder returned null pointer to RemoteProvisioning service.");
+                    jobFinished(mParams, true /* wantsReschedule */);
+                    return;
+                }
                 // TODO: Replace expiration date parameter with value fetched from server
                 checkAndProvision(binder, 1, SecurityLevel.TRUSTED_ENVIRONMENT);
                 jobFinished(mParams, false /* wantsReschedule */);
