@@ -27,7 +27,8 @@ android_app {
         "cbor-java",
     ],
     static_libs: [
-        "android.security.remoteprovisioning-java"
+        "android.hardware.security.keymint-V1-java",
+        "android.security.remoteprovisioning-java",
     ],
     resource_dirs: ["res"],
     srcs: ["src/**/*.java",
