@@ -16,8 +16,10 @@
 
 package com.android.remoteprovisioner;
 
+import android.os.Build;
 import android.util.Log;
 
+import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.CborException;
@@ -29,6 +31,7 @@ import co.nstant.in.cbor.model.MajorType;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -143,6 +146,31 @@ public class CborUtils {
                                     ((ByteString) dataItems.get(CHALLENGE_INDEX)).getBytes());
         } catch (CborException e) {
             Log.e(TAG, "CBOR parsing/serializing failed.", e);
+            return null;
+        }
+    }
+
+    /**
+     * Gathers information from system properties to populate and serialize a CBOR Map to be
+     * sent to the server.
+     */
+    public static byte[] getDeviceInfo() {
+        try {
+            ByteArrayOutputStream os = new ByteArrayOutputStream();
+            new CborEncoder(os).encode(new CborBuilder()
+                    .addMap()
+                        .put("brand", Build.BRAND.getBytes(StandardCharsets.UTF_8))
+                        .put("manufacturer", Build.MANUFACTURER.getBytes(StandardCharsets.UTF_8))
+                        .put("product", Build.PRODUCT.getBytes(StandardCharsets.UTF_8))
+                        .put("model", Build.MODEL.getBytes(StandardCharsets.UTF_8))
+                        .put("board", Build.BOARD.getBytes(StandardCharsets.UTF_8))
+                        .put("vb_state", System.getProperty("ro.boot.verifiedbootstate"))
+                        .put("bootloader_state", System.getProperty("ro.boot.vbmeta.device_state"))
+                        .end()
+                    .build());
+            return os.toByteArray();
+        } catch (CborException e) {
+            Log.e(TAG, "Failed to seerialize DeviceInfo", e);
             return null;
         }
     }

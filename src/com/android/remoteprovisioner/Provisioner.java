@@ -17,6 +17,7 @@
 package com.android.remoteprovisioner;
 
 import android.annotation.NonNull;
+import android.hardware.security.keymint.ProtectedData;
 import android.os.RemoteException;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
@@ -29,6 +30,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -180,11 +182,13 @@ public class Provisioner {
         }
         byte[] payload = null;
         try {
+            ProtectedData dataBundle = new ProtectedData();
             payload = binder.generateCsr(false /* testMode */,
                     numKeys,
                     geek.geek,
                     geek.challenge,
-                    secLevel);
+                    secLevel,
+                    dataBundle);
         } catch (RemoteException e) {
             Log.e(TAG, "Failed to generate CSR blob", e);
             return false;
@@ -227,11 +231,14 @@ public class Provisioner {
             }
             byte[] rawPublicKey = Arrays.copyOfRange(keyEncoding, 1 /* from */, 65 /* to */);
             try {
-                binder.provisionCertChain(rawPublicKey, certChain, expirationDate, secLevel);
+                binder.provisionCertChain(rawPublicKey, cert.getEncoded(), certChain,
+                        expirationDate, secLevel);
             } catch (RemoteException e) {
                 Log.e(TAG, "Error on the binder side when attempting to provision the signed chain",
                         e);
                 return false;
+            } catch (CertificateEncodingException e) {
+                Log.e(TAG, "Somehow can't re-encode the decoded batch cert...", e);
             }
         }
         return true;
