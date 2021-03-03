@@ -18,10 +18,10 @@ package com.android.remoteprovisioner.service;
 
 import android.app.Service;
 import android.content.Intent;
-import android.hardware.security.keymint.SecurityLevel;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.security.IGenerateRkpKeyService;
 import android.security.remoteprovisioning.AttestationPoolStatus;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
@@ -31,7 +31,7 @@ import com.android.remoteprovisioner.Provisioner;
 /**
  * Provides the implementation for IGenerateKeyService.aidl
  */
-public class GenerateKeyService extends Service {
+public class GenerateRkpKeyService extends Service {
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String TAG = "RemoteProvisioningService";
 
@@ -45,14 +45,26 @@ public class GenerateKeyService extends Service {
         return mBinder;
     }
 
-    private final IGenerateKeyService.Stub mBinder = new IGenerateKeyService.Stub() {
+    private final IGenerateRkpKeyService.Stub mBinder = new IGenerateRkpKeyService.Stub() {
         @Override
-        public void generateKey() {
+        public void generateKey(int securityLevel) {
             try {
                 IRemoteProvisioning binder =
                         IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
                 // Iterate through each security level backend
-                checkAndFillPool(binder, SecurityLevel.TRUSTED_ENVIRONMENT);
+                checkAndFillPool(binder, securityLevel);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Remote Exception: ", e);
+            }
+        }
+
+        @Override
+        public void notifyKeyGenerated(int securityLevel) {
+            try {
+                IRemoteProvisioning binder =
+                        IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
+                // Iterate through each security level backend
+                checkAndFillPool(binder, securityLevel);
             } catch (RemoteException e) {
                 Log.e(TAG, "Remote Exception: ", e);
             }
