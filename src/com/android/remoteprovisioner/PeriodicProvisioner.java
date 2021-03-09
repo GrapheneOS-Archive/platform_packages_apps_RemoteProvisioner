@@ -18,7 +18,6 @@ package com.android.remoteprovisioner;
 
 import android.app.job.JobParameters;
 import android.app.job.JobService;
-import android.hardware.security.keymint.SecurityLevel;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.security.remoteprovisioning.AttestationPoolStatus;
@@ -31,8 +30,10 @@ import android.util.Log;
  * signed, it drives that process.
  */
 public class PeriodicProvisioner extends JobService {
-    //TODO(b/176249146): Replace default key amount with a value fetched from the server.
-    private static final int TOTAL_SIGNED_KEYS = 10;
+    //TODO(b/176249146): Replace default values here with values fetched from the server.
+    private static int sTotalSignedKeys = 0;
+    // Check for expiring certs in the next 3 days
+    private static int sExpiringBy = 1000 * 60 * 60 * 24 * 3;
 
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String TAG = "RemoteProvisioningService";
@@ -73,8 +74,19 @@ public class PeriodicProvisioner extends JobService {
                     jobFinished(mParams, true /* wantsReschedule */);
                     return;
                 }
-                // TODO: Replace expiration date parameter with value fetched from server
-                checkAndProvision(binder, 1, SecurityLevel.TRUSTED_ENVIRONMENT);
+                int[] securityLevels = binder.getSecurityLevels();
+                if (securityLevels == null) {
+                    Log.e(TAG, "No instances of IRemotelyProvisionedComponent registered in "
+                               + SERVICE);
+                    jobFinished(mParams, true /* wantsReschedule */);
+                    return;
+                }
+                for (int i = 0; i < securityLevels.length; i++) {
+                    // TODO(b/176249146): Replace expiration date parameter with value fetched from
+                    //                    server
+                    checkAndProvision(binder, System.currentTimeMillis() + sExpiringBy,
+                            securityLevels[i]);
+                }
                 jobFinished(mParams, false /* wantsReschedule */);
             } catch (RemoteException e) {
                 jobFinished(mParams, true /* wantsReschedule */);
@@ -89,7 +101,7 @@ public class PeriodicProvisioner extends JobService {
                 throws InterruptedException, RemoteException {
             AttestationPoolStatus pool = binder.getPoolStatus(expiringBy, secLevel);
             int generated = 0;
-            while (generated + pool.total - pool.expiring < TOTAL_SIGNED_KEYS) {
+            while (generated + pool.total - pool.expiring < sTotalSignedKeys) {
                 generated++;
                 binder.generateKeyPair(false /* isTestMode */, secLevel);
                 Thread.sleep(5000);
