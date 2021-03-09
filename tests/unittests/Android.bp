@@ -23,8 +23,17 @@ android_test {
         "platform-test-annotations",
         "ub-uiautomator",
         "cbor-java",
+        "tink-prebuilt",
+        "bouncycastle-unbundled",
     ],
-    sdk_version: "current",
+    platform_apis: true,
     test_suites: ["device-tests"],
     instrumentation_for: "RemoteProvisioner",
+}
+
+java_import {
+    name: "tink-prebuilt",
+    jars: ["tink-android-1.5.0.jar"],
+    sdk_version: "current",
+    visibility: ["//visibility:private"],
 }
