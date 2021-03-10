@@ -17,6 +17,7 @@
 package com.android.remoteprovisioner.unittest;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 import android.platform.test.annotations.Presubmit;
@@ -27,14 +28,20 @@ import com.android.remoteprovisioner.CborUtils;
 import com.android.remoteprovisioner.GeekResponse;
 
 import co.nstant.in.cbor.CborBuilder;
+import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
+import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.DataItem;
+import co.nstant.in.cbor.model.MajorType;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.List;
 
 @RunWith(AndroidJUnit4.class)
 public class CborUtilsTest {
@@ -145,5 +152,44 @@ public class CborUtilsTest {
                     .end()
                 .build());
         assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
+    }
+
+    @Test
+    public void testCreateCertificateRequest() throws Exception {
+        byte[] challenge = new byte[] {0x01, 0x02, 0x03};
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .add("protected header")
+                    .add("unprotected header")
+                    .add("super secret payload")
+                    .add("super not secret recipient")
+                    .end()
+                .build());
+        byte[] protectedDataPayload = mBaos.toByteArray();
+        mBaos.reset();
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .add("protected header")
+                    .add("unprotected header")
+                    .add("super not secret payload")
+                    .add("mac tag")
+                    .end()
+                .build());
+        byte[] macedKeysToSign = mBaos.toByteArray();
+        byte[] certReq =
+                CborUtils.buildCertificateRequest(CborUtils.getDeviceInfo(),
+                                                  challenge,
+                                                  protectedDataPayload,
+                                                  macedKeysToSign);
+        ByteArrayInputStream bais = new ByteArrayInputStream(certReq);
+        List<DataItem> dataItems = new CborDecoder(bais).decode();
+        assertEquals(1, dataItems.size());
+        assertEquals(MajorType.ARRAY, dataItems.get(0).getMajorType());
+        dataItems = ((Array) dataItems.get(0)).getDataItems();
+        assertEquals(4, dataItems.size());
+        assertEquals(MajorType.MAP, dataItems.get(0).getMajorType());
+        assertEquals(MajorType.BYTE_STRING, dataItems.get(1).getMajorType());
+        assertEquals(MajorType.ARRAY, dataItems.get(2).getMajorType());
+        assertEquals(MajorType.ARRAY, dataItems.get(3).getMajorType());
     }
 }
