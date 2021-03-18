@@ -121,7 +121,8 @@ public class SystemInterfaceTest {
         return (Array) (new CborBuilder()
                 .addArray()
                     .add(serializeProtectedHeaders())
-                    .add(new byte[0]) //unprotected headers. This should be an empty map
+                    .addMap()
+                        .end()
                     .add(buildSignatureKey())
                     //signature; test mode will instruct the HAL component to skip verification
                     .add(new byte[0])
@@ -153,7 +154,8 @@ public class SystemInterfaceTest {
         return (Array) (new CborBuilder()
                 .addArray()
                     .add(serializeProtectedHeaders())
-                    .add(new byte[0])
+                    .addMap()
+                        .end()
                     .add(buildEek(eek))
                     .add(new byte[0]) //signature; test mode skips this
                     .end()
