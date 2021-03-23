@@ -17,6 +17,7 @@
 package com.android.remoteprovisioner;
 
 import android.annotation.NonNull;
+import android.hardware.security.keymint.DeviceInfo;
 import android.hardware.security.keymint.ProtectedData;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
@@ -68,16 +69,18 @@ public class Provisioner {
             Log.e(TAG, "The geek is null");
             return false;
         }
+        DeviceInfo deviceInfo = new DeviceInfo();
         ProtectedData protectedData = new ProtectedData();
         byte[] macedKeysToSign =
                 SystemInterface.generateCsr(false /* testMode */, numKeys, secLevel, geek,
-                                            protectedData, binder);
-        if (macedKeysToSign == null || protectedData.protectedData == null) {
+                                            protectedData, deviceInfo, binder);
+        if (macedKeysToSign == null || protectedData.protectedData == null
+                || deviceInfo.deviceInfo == null) {
             Log.e(TAG, "Keystore failed to generate a payload");
             return false;
         }
         byte[] certificateRequest =
-                CborUtils.buildCertificateRequest(CborUtils.getDeviceInfo(),
+                CborUtils.buildCertificateRequest(deviceInfo.deviceInfo,
                                                   geek.challenge,
                                                   protectedData.protectedData,
                                                   macedKeysToSign);
