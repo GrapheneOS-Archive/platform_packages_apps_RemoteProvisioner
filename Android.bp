@@ -21,6 +21,7 @@ android_app {
     name: "RemoteProvisioner",
     platform_apis: true,
     privileged: true,
+    system_ext_specific: true,
     libs: [
         "android.system.keystore2-V1-java",
         "framework-annotations-lib",
