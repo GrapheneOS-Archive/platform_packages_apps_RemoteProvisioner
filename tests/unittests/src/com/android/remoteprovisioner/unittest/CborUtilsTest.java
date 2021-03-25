@@ -156,6 +156,16 @@ public class CborUtilsTest {
 
     @Test
     public void testCreateCertificateRequest() throws Exception {
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addMap()
+                    .put("a", "b")
+                    .put("cool", "yeah")
+                    .put("testing", "123")
+                    .put("str", "str")
+                    .end()
+                .build());
+        byte[] deviceInfo = mBaos.toByteArray();
+        mBaos.reset();
         byte[] challenge = new byte[] {0x01, 0x02, 0x03};
         new CborEncoder(mBaos).encode(new CborBuilder()
                 .addArray()
@@ -177,7 +187,7 @@ public class CborUtilsTest {
                 .build());
         byte[] macedKeysToSign = mBaos.toByteArray();
         byte[] certReq =
-                CborUtils.buildCertificateRequest(CborUtils.getDeviceInfo(),
+                CborUtils.buildCertificateRequest(deviceInfo,
                                                   challenge,
                                                   protectedDataPayload,
                                                   macedKeysToSign);
