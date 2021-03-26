@@ -21,6 +21,7 @@ android_app {
     name: "RemoteProvisioner",
     platform_apis: true,
     privileged: true,
+    system_ext_specific: true,
     libs: [
         "android.system.keystore2-V1-java",
         "framework-annotations-lib",
@@ -31,9 +32,5 @@ android_app {
         "android.security.remoteprovisioning-java",
     ],
     resource_dirs: ["res"],
-    srcs: ["src/**/*.java",
-           "src/**/I*.aidl",],
-    aidl: {
-        local_include_dirs: ["src"],
-    },
+    srcs: ["src/**/*.java"],
 }
