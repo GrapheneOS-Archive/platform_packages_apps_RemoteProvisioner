@@ -17,10 +17,15 @@
 package com.android.remoteprovisioner;
 
 import android.annotation.NonNull;
+import android.hardware.security.keymint.DeviceInfo;
 import android.hardware.security.keymint.ProtectedData;
 import android.os.RemoteException;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.List;
 
 import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
@@ -29,10 +34,6 @@ import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.builder.ArrayBuilder;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.DataItem;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.util.List;
 
 /**
  * Provides convenience methods for interfacing with the android.security.remoteprovisioning system
@@ -76,7 +77,8 @@ public class SystemInterface {
      * will be populated by the underlying binder service.
      */
     public static byte[] generateCsr(boolean testMode, int numKeys, int secLevel, GeekResponse geek,
-            ProtectedData dataBlob, @NonNull IRemoteProvisioning binder) {
+            ProtectedData protectedData, DeviceInfo deviceInfo,
+            @NonNull IRemoteProvisioning binder) {
         try {
             ProtectedData dataBundle = new ProtectedData();
             byte[] macedPublicKeys = binder.generateCsr(testMode,
@@ -84,7 +86,8 @@ public class SystemInterface {
                                                         geek.geek,
                                                         geek.challenge,
                                                         secLevel,
-                                                        dataBlob);
+                                                        protectedData,
+                                                        deviceInfo);
             ByteArrayInputStream bais = new ByteArrayInputStream(macedPublicKeys);
             List<DataItem> dataItems = new CborDecoder(bais).decode();
             List<DataItem> macInfo = ((Array) dataItems.get(0)).getDataItems();
