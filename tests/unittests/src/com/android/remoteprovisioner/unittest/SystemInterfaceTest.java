@@ -300,7 +300,7 @@ public class SystemInterfaceTest {
                         .add(serverPub)
                         .end()
                     .addArray()
-                        .add(128) // key length
+                        .add(256) // key length
                         .add(new byte[0])
                         .end()
                     .end()
