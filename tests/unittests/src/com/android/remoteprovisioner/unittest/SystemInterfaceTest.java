@@ -58,6 +58,7 @@ import co.nstant.in.cbor.model.Map;
 import co.nstant.in.cbor.model.NegativeInteger;
 import co.nstant.in.cbor.model.UnsignedInteger;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -91,6 +92,11 @@ public class SystemInterfaceTest {
         mBinder =
               IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
         assertNotNull(mBinder);
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        mBinder.deleteAllKeys();
     }
 
     private static byte[] serializeProtectedHeaders() throws CborException {
@@ -300,7 +306,7 @@ public class SystemInterfaceTest {
                         .add(serverPub)
                         .end()
                     .addArray()
-                        .add(128) // key length
+                        .add(256) // key length
                         .add(new byte[0])
                         .end()
                     .end()

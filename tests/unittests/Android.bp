@@ -20,6 +20,7 @@ android_test {
     srcs: ["src/**/*.java"],
     static_libs: [
         "androidx.test.rules",
+        "android.security.remoteprovisioning-java",
         "platform-test-annotations",
         "ub-uiautomator",
         "cbor-java",
