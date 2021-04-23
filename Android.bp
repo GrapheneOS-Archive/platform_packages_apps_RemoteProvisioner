@@ -25,11 +25,11 @@ android_app {
     libs: [
         "android.system.keystore2-V1-java",
         "framework-annotations-lib",
-        "cbor-java",
     ],
     static_libs: [
         "android.hardware.security.keymint-V1-java",
         "android.security.remoteprovisioning-java",
+        "cbor-java",
     ],
     resource_dirs: ["res"],
     srcs: ["src/**/*.java"],
