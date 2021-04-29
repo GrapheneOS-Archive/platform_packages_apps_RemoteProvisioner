@@ -54,14 +54,6 @@ public class SystemInterface {
         return baos.toByteArray();
     }
 
-    private static byte[] encodeMac(DataItem mac) throws CborException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        new CborEncoder(baos).encode(new CborBuilder()
-                .add(mac)
-                .build());
-        return baos.toByteArray();
-    }
-
     private static byte[] encodePayload(List<DataItem> keys) throws CborException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ArrayBuilder<CborBuilder> builder = new CborBuilder().addArray();
@@ -98,7 +90,7 @@ public class SystemInterface {
                         .addMap() //unprotected headers
                             .end()
                         .add(encodePayload(macInfo))
-                        .add(encodeMac(macInfo.get(0)))
+                        .add(macInfo.get(0))
                         .end()
                     .build());
             return baos.toByteArray();
