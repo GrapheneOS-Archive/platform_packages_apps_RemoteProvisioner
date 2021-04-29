@@ -28,6 +28,7 @@ android_test {
         "bouncycastle-unbundled",
     ],
     platform_apis: true,
+    test_config: "AndroidTest.xml",
     test_suites: ["device-tests"],
     instrumentation_for: "RemoteProvisioner",
 }
