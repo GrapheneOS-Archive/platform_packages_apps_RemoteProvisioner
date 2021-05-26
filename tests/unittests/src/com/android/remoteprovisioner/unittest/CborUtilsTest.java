@@ -197,9 +197,19 @@ public class CborUtilsTest {
         assertEquals(MajorType.ARRAY, dataItems.get(0).getMajorType());
         dataItems = ((Array) dataItems.get(0)).getDataItems();
         assertEquals(4, dataItems.size());
-        assertEquals(MajorType.MAP, dataItems.get(0).getMajorType());
+        // Array: DeviceInfo
+        //      Map: VerifiedDeviceInfo
+        //      Map: UnverifiedDeviceInfo
+        assertEquals(MajorType.ARRAY, dataItems.get(0).getMajorType());
+        assertEquals(MajorType.MAP,
+                ((Array) dataItems.get(0)).getDataItems().get(0).getMajorType());
+        assertEquals(MajorType.MAP,
+                ((Array) dataItems.get(0)).getDataItems().get(1).getMajorType());
+        // Challenge
         assertEquals(MajorType.BYTE_STRING, dataItems.get(1).getMajorType());
+        // ProtectedData
         assertEquals(MajorType.ARRAY, dataItems.get(2).getMajorType());
+        // MacedKeysToSign
         assertEquals(MajorType.ARRAY, dataItems.get(3).getMajorType());
     }
 }
