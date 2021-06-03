@@ -16,6 +16,7 @@
 
 package com.android.remoteprovisioner;
 
+import android.os.Build;
 import android.util.Log;
 
 import java.io.ByteArrayInputStream;
@@ -33,6 +34,7 @@ import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
 import co.nstant.in.cbor.model.Map;
+import co.nstant.in.cbor.model.UnicodeString;
 
 public class CborUtils {
     private static final int RESPONSE_CERT_ARRAY_INDEX = 0;
@@ -186,13 +188,19 @@ public class CborUtils {
                 Log.e(TAG, "macedKeysToSign is carrying unexpected data.");
                 return null;
             }
-            Map deviceInfoMap = (Map) dataItems.get(0);
+            Map verifiedDeviceInfoMap = (Map) dataItems.get(0);
+            Map unverifiedDeviceInfoMap = new Map();
+            unverifiedDeviceInfoMap.put(new UnicodeString("fingerprint"),
+                                        new UnicodeString(Build.FINGERPRINT));
 
             // Serialize the actual CertificateSigningRequest structure
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             new CborEncoder(baos).encode(new CborBuilder()
                     .addArray()
-                        .add(deviceInfoMap)
+                        .addArray()
+                            .add(verifiedDeviceInfoMap)
+                            .add(unverifiedDeviceInfoMap)
+                            .end()
                         .add(challenge)
                         .add(protectedDataArray)
                         .add(macedKeysToSignArray)
