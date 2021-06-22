@@ -27,7 +27,6 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import android.hardware.security.keymint.DeviceInfo;
 import android.hardware.security.keymint.ProtectedData;
@@ -49,7 +48,6 @@ import com.google.crypto.tink.subtle.X25519;
 import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
-import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
@@ -68,11 +66,10 @@ import java.io.ByteArrayOutputStream;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -92,6 +89,7 @@ public class SystemInterfaceTest {
         mBinder =
               IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
         assertNotNull(mBinder);
+        mBinder.deleteAllKeys();
     }
 
     @After
@@ -99,82 +97,16 @@ public class SystemInterfaceTest {
         mBinder.deleteAllKeys();
     }
 
-    private static byte[] serializeProtectedHeaders() throws CborException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        new CborEncoder(baos).encode(new CborBuilder()
-                .addMap()
-                    .put(1, -8) // Algorithm, EdDSA
-                    .end()
-                .build());
-        return baos.toByteArray();
-    }
-
-    private static byte[] buildSignatureKey() throws CborException {
-        byte[] key = new byte[32];
-        new Random().nextBytes(key);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        new CborEncoder(baos).encode(new CborBuilder()
-                .addMap()
-                    .put(1, 1) // Key type, OKP
-                    .put(3, -8) // Algorithm, EdDSA
-                    .put(-1, 6) // Curve, Ed25519
-                    .put(-2, key) // public key, bytes
-                    .end()
-                .build());
-        return baos.toByteArray();
-    }
-
-    private static Array buildSignedSignatureKey() throws CborException {
-        return (Array) (new CborBuilder()
-                .addArray()
-                    .add(serializeProtectedHeaders())
-                    .addMap()
-                        .end()
-                    .add(buildSignatureKey())
-                    //signature; test mode will instruct the HAL component to skip verification
-                    .add(new byte[0])
-                    .end()
-                .build().get(0));
-    }
-
-    private static byte[] buildEek(byte[] eek) throws CborException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            new CborEncoder(baos).encode(new CborBuilder()
-                    .addMap()
-                        .put(1, 1) // Key type, OKP
-                        .put(2, digest.digest(eek)) // KID: EEK ID
-                        .put(3, -25) // Algorithm
-                        .put(-1, 4) // Curve, X25519
-                        .put(-2, eek) // public key, bytes
-                        .end()
-                    .build());
-            return baos.toByteArray();
-        } catch (NoSuchAlgorithmException e) {
-            fail("SHA-256 somehow not available");
-            return null;
-        }
-    }
-
-    private static Array buildSignedEek(byte[] eek) throws CborException {
-        return (Array) (new CborBuilder()
-                .addArray()
-                    .add(serializeProtectedHeaders())
-                    .addMap()
-                        .end()
-                    .add(buildEek(eek))
-                    .add(new byte[0]) //signature; test mode skips this
-                    .end()
-                .build().get(0));
-    }
-
-    private byte[] generateEekChain(byte[] eek) throws CborException {
+    private byte[] generateEekChain(byte[] eek) throws Exception {
+        com.google.crypto.tink.subtle.Ed25519Sign.KeyPair kp =
+                com.google.crypto.tink.subtle.Ed25519Sign.KeyPair.newKeyPair();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         new CborEncoder(baos).encode(new CborBuilder()
                 .addArray()
-                    .add(buildSignedSignatureKey())
-                    .add(buildSignedEek(eek))
+                    .add(Utils.encodeAndSignSign1Ed25519(
+                            Utils.encodeEd25519PubKey(kp.getPublicKey()), kp.getPrivateKey()))
+                    .add(Utils.encodeAndSignSign1Ed25519(
+                            Utils.encodeX25519PubKey(eek), kp.getPrivateKey()))
                     .end()
                 .build());
         return baos.toByteArray();
@@ -221,11 +153,13 @@ public class SystemInterfaceTest {
     public void testGenerateCSRProvisionAndUseKey() throws Exception {
         DeviceInfo deviceInfo = new DeviceInfo();
         ProtectedData encryptedBundle = new ProtectedData();
-        int numKeys = 1;
+        int numKeys = 10;
         byte[] eek = new byte[32];
         new Random().nextBytes(eek);
         GeekResponse geek = new GeekResponse(generateEekChain(eek), new byte[] {0x02});
-        mBinder.generateKeyPair(true /* testMode */, SecurityLevel.TRUSTED_ENVIRONMENT);
+        for (int i = 0; i < numKeys; i++) {
+            mBinder.generateKeyPair(true /* testMode */, SecurityLevel.TRUSTED_ENVIRONMENT);
+        }
         byte[] bundle =
             SystemInterface.generateCsr(true /* testMode */, numKeys,
                                         SecurityLevel.TRUSTED_ENVIRONMENT,
@@ -246,40 +180,51 @@ public class SystemInterfaceTest {
         assertEquals(MajorType.ARRAY, publicKeysArr.get(0).getMajorType());
         Array publicKeys = (Array) publicKeysArr.get(0);
         assertEquals(numKeys, publicKeys.getDataItems().size());
-        Map publicKey = (Map) publicKeys.getDataItems().get(0);
-        byte[] xPub = ((ByteString) publicKey.get(new NegativeInteger(-2))).getBytes();
-        byte[] yPub = ((ByteString) publicKey.get(new NegativeInteger(-3))).getBytes();
-        assertEquals(xPub.length, 32);
-        assertEquals(yPub.length, 32);
         KeyPair rootKeyPair = generateEcdsaKeyPair();
         KeyPair intermediateKeyPair = generateEcdsaKeyPair();
-        PublicKey leafKeyToSign = getP256PubKeyFromBytes(xPub, yPub);
-        X509Certificate[] certChain = new X509Certificate[3];
-        certChain[0] = signPublicKey(intermediateKeyPair, leafKeyToSign);
-        certChain[1] = signPublicKey(rootKeyPair, intermediateKeyPair.getPublic());
-        certChain[2] = signPublicKey(rootKeyPair, rootKeyPair.getPublic());
-        ByteArrayOutputStream os = new ByteArrayOutputStream();
-        for (int i = 0; i < certChain.length; i++) {
-            os.write(certChain[i].getEncoded());
+        X509Certificate[][] certChain = new X509Certificate[numKeys][3];
+        for (int i = 0; i < numKeys; i++) {
+            Map publicKey = (Map) publicKeys.getDataItems().get(i);
+            byte[] xPub = ((ByteString) publicKey.get(new NegativeInteger(-2))).getBytes();
+            byte[] yPub = ((ByteString) publicKey.get(new NegativeInteger(-3))).getBytes();
+            assertEquals(xPub.length, 32);
+            assertEquals(yPub.length, 32);
+            PublicKey leafKeyToSign = getP256PubKeyFromBytes(xPub, yPub);
+            certChain[i][0] = signPublicKey(intermediateKeyPair, leafKeyToSign);
+            certChain[i][1] = signPublicKey(rootKeyPair, intermediateKeyPair.getPublic());
+            certChain[i][2] = signPublicKey(rootKeyPair, rootKeyPair.getPublic());
+            ByteArrayOutputStream os = new ByteArrayOutputStream();
+            for (int j = 0; j < certChain[i].length; j++) {
+                os.write(certChain[i][j].getEncoded());
+            }
+            SystemInterface.provisionCertChain(X509Utils.getAndFormatRawPublicKey(certChain[i][0]),
+                                               certChain[i][0].getEncoded() /* leafCert */,
+                                               os.toByteArray() /* certChain */,
+                                               System.currentTimeMillis() + 2000 /* validity */,
+                                               SecurityLevel.TRUSTED_ENVIRONMENT,
+                                               mBinder);
         }
-        SystemInterface.provisionCertChain(X509Utils.getAndFormatRawPublicKey(certChain[0]),
-                                           certChain[0].getEncoded(),
-                                           os.toByteArray(),
-                                           System.currentTimeMillis() + 2000, // Valid for 2 seconds
-                                           SecurityLevel.TRUSTED_ENVIRONMENT,
-                                           mBinder);
         // getPoolStatus will clean the key pool before we go to assign a new provisioned key
         mBinder.getPoolStatus(0, SecurityLevel.TRUSTED_ENVIRONMENT);
         Certificate[] provisionedCerts1 = generateKeyStoreKey("alias");
         Certificate[] provisionedCerts2 = generateKeyStoreKey("alias2");
         assertEquals(4, provisionedCerts1.length);
         assertEquals(4, provisionedCerts2.length);
+        boolean matched = false;
         for (int i = 0; i < certChain.length; i++) {
-            assertArrayEquals("i = " + i,
-                    provisionedCerts1[i + 1].getEncoded(), certChain[i].getEncoded());
-            assertArrayEquals("i = " + i,
-                    provisionedCerts2[i + 1].getEncoded(), certChain[i].getEncoded());
+            if (Arrays.equals(provisionedCerts1[1].getEncoded(), certChain[i][0].getEncoded())) {
+                matched = true;
+                assertArrayEquals("Second key: j = 0",
+                        provisionedCerts2[1].getEncoded(), certChain[i][0].getEncoded());
+                for (int j = 1; j < certChain[i].length; j++) {
+                    assertArrayEquals("First key: j = " + j,
+                            provisionedCerts1[j + 1].getEncoded(), certChain[i][j].getEncoded());
+                    assertArrayEquals("Second key: j = " + j,
+                            provisionedCerts2[j + 1].getEncoded(), certChain[i][j].getEncoded());
+                }
+            }
         }
+        assertTrue(matched);
     }
 
     private static byte[] extractRecipientKey(Array recipients) {
