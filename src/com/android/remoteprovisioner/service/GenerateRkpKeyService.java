@@ -74,11 +74,13 @@ public class GenerateRkpKeyService extends Service {
                 throws RemoteException {
             AttestationPoolStatus pool =
                     binder.getPoolStatus(System.currentTimeMillis(), secLevel);
-            if (pool.unassigned == 0) {
+            // If there are no unassigned keys, go ahead and provision some. If there are no keys
+            // at all on system, this implies that it is a hybrid rkp/factory-provisioned system
+            // that has turned off RKP. In that case, do not provision.
+            if (pool.unassigned == 0 && pool.total != 0) {
+                Log.d(TAG, "All signed keys are currently in use, provisioning more.");
                 binder.generateKeyPair(false /* isTestMode */, secLevel);
                 Provisioner.provisionCerts(1 /* numCsr */, secLevel, binder);
-            } else {
-                Log.e(TAG, "generateKey() called, but signed certs are available.");
             }
         }
     };
