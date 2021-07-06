@@ -34,6 +34,7 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         Log.d(TAG, "Caught boot intent, waking up.");
+        SettingsManager.generateAndSetId(context);
         JobInfo info = new JobInfo
                 .Builder(1, new ComponentName(context, PeriodicProvisioner.class))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)

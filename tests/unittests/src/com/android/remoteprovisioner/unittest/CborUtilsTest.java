@@ -31,8 +31,12 @@ import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
 import co.nstant.in.cbor.model.Array;
+import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
 import co.nstant.in.cbor.model.MajorType;
+import co.nstant.in.cbor.model.Map;
+import co.nstant.in.cbor.model.UnicodeString;
+import co.nstant.in.cbor.model.UnsignedInteger;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -47,10 +51,48 @@ import java.util.List;
 public class CborUtilsTest {
 
     private ByteArrayOutputStream mBaos;
+    private Array mGeekChain1;
+    private byte[] mEncodedmGeekChain1;
+    private Array mGeekChain2;
+    private byte[] mEncodedGeekChain2;
+    private Map mDeviceConfig;
+    private static final byte[] CHALLENGE = new byte[]{0x0a, 0x0b, 0x0c};
+    private static final int TEST_EXTRA_KEYS = 18;
+    private static final int TEST_TIME_TO_REFRESH_HOURS = 42;
+    private static final String TEST_URL = "https://www.wonderifthisisvalid.combutjustincase";
+
+    private byte[] encodeDataItem(DataItem toEncode) throws Exception {
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                        .add(toEncode)
+                        .build());
+        byte[] encoded = mBaos.toByteArray();
+        mBaos.reset();
+        return encoded;
+    }
 
     @Before
     public void setUp() throws Exception {
         mBaos = new ByteArrayOutputStream();
+
+        mGeekChain1 = new Array();
+        mGeekChain1.add(new ByteString(new byte[] {0x01, 0x02, 0x03}))
+                   .add(new ByteString(new byte[] {0x04, 0x05, 0x06}))
+                   .add(new ByteString(new byte[] {0x07, 0x08, 0x09}));
+        mEncodedmGeekChain1 = encodeDataItem(mGeekChain1);
+
+        mGeekChain2 = new Array();
+        mGeekChain2.add(new ByteString(new byte[] {0x09, 0x08, 0x07}))
+                   .add(new ByteString(new byte[] {0x06, 0x05, 0x04}))
+                   .add(new ByteString(new byte[] {0x03, 0x02, 0x01}));
+        mEncodedGeekChain2 = encodeDataItem(mGeekChain2);
+
+        mDeviceConfig = new Map();
+        mDeviceConfig.put(new UnicodeString(CborUtils.EXTRA_KEYS),
+                          new UnsignedInteger(TEST_EXTRA_KEYS))
+                     .put(new UnicodeString(CborUtils.TIME_TO_REFRESH),
+                          new UnsignedInteger(TEST_TIME_TO_REFRESH_HOURS))
+                     .put(new UnicodeString(CborUtils.PROVISIONING_URL),
+                          new UnicodeString(TEST_URL));
     }
 
     @Presubmit
@@ -116,39 +158,182 @@ public class CborUtilsTest {
     public void testParseGeekResponseFakeData() throws Exception {
         new CborEncoder(mBaos).encode(new CborBuilder()
                 .addArray()
-                    .addArray()                                       // GEEK Chain
-                        .add(new byte[] {0x01, 0x02, 0x03})
-                        .add(new byte[] {0x04, 0x05, 0x06})
-                        .add(new byte[] {0x07, 0x08, 0x09})
+                    .addArray()                                       // GEEK Curve to Chains
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_P256))
+                            .add(mGeekChain2)
+                            .end()
                         .end()
-                    .add(new byte[] {0x0a, 0x0b, 0x0c})               // Challenge
+                    .add(CHALLENGE)
+                    .add(mDeviceConfig)
                     .end()
                 .build());
         GeekResponse resp = CborUtils.parseGeekResponse(mBaos.toByteArray());
         mBaos.reset();
+        assertArrayEquals(mEncodedmGeekChain1, resp.getGeekChain(CborUtils.EC_CURVE_25519));
+        assertArrayEquals(mEncodedGeekChain2, resp.getGeekChain(CborUtils.EC_CURVE_P256));
+        assertArrayEquals(CHALLENGE, resp.getChallenge());
+        assertEquals(TEST_EXTRA_KEYS, resp.numExtraAttestationKeys);
+        assertEquals(TEST_TIME_TO_REFRESH_HOURS, resp.timeToRefresh.toHours());
+        assertEquals(TEST_URL, resp.provisioningUrl);
+    }
+
+    @Test
+    public void testExtraDeviceConfigEntriesDontFail() throws Exception {
         new CborEncoder(mBaos).encode(new CborBuilder()
                 .addArray()
-                    .add(new byte[] {0x01, 0x02, 0x03})
-                    .add(new byte[] {0x04, 0x05, 0x06})
-                    .add(new byte[] {0x07, 0x08, 0x09})
+                    .addArray()                                       // GEEK Curve to Chains
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_P256))
+                            .add(mGeekChain2)
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .add(mDeviceConfig.put(new UnicodeString("new_field"),
+                                          new UnsignedInteger(84)))
                     .end()
                 .build());
-        byte[] expectedGeek = mBaos.toByteArray();
-        assertArrayEquals(expectedGeek, resp.geek);
-        assertArrayEquals(new byte[] {0x0a, 0x0b, 0x0c}, resp.challenge);
+        GeekResponse resp = CborUtils.parseGeekResponse(mBaos.toByteArray());
+        mBaos.reset();
+        assertArrayEquals(mEncodedmGeekChain1, resp.getGeekChain(CborUtils.EC_CURVE_25519));
+        assertArrayEquals(mEncodedGeekChain2, resp.getGeekChain(CborUtils.EC_CURVE_P256));
+        assertArrayEquals(CHALLENGE, resp.getChallenge());
+        assertEquals(TEST_EXTRA_KEYS, resp.numExtraAttestationKeys);
+        assertEquals(TEST_TIME_TO_REFRESH_HOURS, resp.timeToRefresh.toHours());
+        assertEquals(TEST_URL, resp.provisioningUrl);
+    }
+
+    @Test
+    public void testMissingDeviceConfigDoesntFail() throws Exception {
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()                                       // GEEK Curve to Chains
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_P256))
+                            .add(mGeekChain2)
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .end()
+                .build());
+        GeekResponse resp = CborUtils.parseGeekResponse(mBaos.toByteArray());
+        mBaos.reset();
+        assertArrayEquals(mEncodedmGeekChain1, resp.getGeekChain(CborUtils.EC_CURVE_25519));
+        assertArrayEquals(mEncodedGeekChain2, resp.getGeekChain(CborUtils.EC_CURVE_P256));
+        assertArrayEquals(CHALLENGE, resp.getChallenge());
+        assertEquals(GeekResponse.NO_EXTRA_KEY_UPDATE, resp.numExtraAttestationKeys);
+        assertEquals(null, resp.timeToRefresh);
+        assertEquals(null, resp.provisioningUrl);
+    }
+
+    @Test
+    public void testMissingDeviceConfigEntriesDoesntFail() throws Exception {
+        mDeviceConfig.remove(new UnicodeString(CborUtils.TIME_TO_REFRESH));
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()                                       // GEEK Curve to Chains
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_P256))
+                            .add(mGeekChain2)
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .add(mDeviceConfig)
+                    .end()
+                .build());
+        GeekResponse resp = CborUtils.parseGeekResponse(mBaos.toByteArray());
+        mBaos.reset();
+        assertArrayEquals(mEncodedmGeekChain1, resp.getGeekChain(CborUtils.EC_CURVE_25519));
+        assertArrayEquals(mEncodedGeekChain2, resp.getGeekChain(CborUtils.EC_CURVE_P256));
+        assertArrayEquals(CHALLENGE, resp.getChallenge());
+        assertEquals(TEST_EXTRA_KEYS, resp.numExtraAttestationKeys);
+        assertEquals(null, resp.timeToRefresh);
+        assertEquals(TEST_URL, resp.provisioningUrl);
+    }
+
+    @Test
+    public void testParseGeekResponseFailsOnWrongType() throws Exception {
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()
+                        .addArray()
+                            .add("String instead of curve enum")
+                            .add(mGeekChain1)
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .add(mDeviceConfig)
+                    .end()
+                .build());
+        assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
+        mBaos.reset();
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(new ByteString(CHALLENGE)) // Must be an array of bstrs
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .add(mDeviceConfig)
+                    .end()
+                .build());
+        assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
+        mBaos.reset();
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .end()
+                    .add(new UnicodeString("tstr instead of bstr"))
+                    .add(mDeviceConfig)
+                    .end()
+                .build());
+        assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
+        mBaos.reset();
+        new CborEncoder(mBaos).encode(new CborBuilder()
+                .addArray()
+                    .addArray()
+                        .addArray()
+                            .add(new UnsignedInteger(CborUtils.EC_CURVE_25519))
+                            .add(mGeekChain1)
+                            .end()
+                        .end()
+                    .add(CHALLENGE)
+                    .add(CHALLENGE)
+                    .end()
+                .build());
+        assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
     }
 
     @Test
     public void testParseGeekResponseWrongSize() throws Exception {
         new CborEncoder(mBaos).encode(new CborBuilder()
                 .addArray()
-                    .addArray()
-                        .add(new byte[] {0x01, 0x02, 0x03})
-                        .add(new byte[] {0x04, 0x05, 0x06})
-                        .add(new byte[] {0x07, 0x08, 0x09})
-                        .end()
-                    .add(new byte[] {0x0a, 0x0b, 0x0c})
-                    .add("One more entry than there should be")
+                    .add("one entry")
+                    .add("two entries")
+                    .add("three entries")
+                    .add("whoops")
                     .end()
                 .build());
         assertNull(CborUtils.parseGeekResponse(mBaos.toByteArray()));
