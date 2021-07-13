@@ -163,7 +163,9 @@ public class ServerToSystemTest {
                                         "Not even a URL" /* url */);
         // Even if there is an unsigned key hanging around, fallback should still occur.
         Certificate[] fallbackKeyCerts2 = generateKeyStoreKey("test3");
-        assertEquals(1, SettingsManager.getFailureCounter(sContext));
+        // Due to there being no attested keys in the pool, the provisioning service should not
+        // have even attempted to provision more certificates.
+        assertEquals(0, SettingsManager.getFailureCounter(sContext));
         assertTrue(fallbackKeyCerts1.length == fallbackKeyCerts2.length);
         for (int i = 1; i < fallbackKeyCerts1.length; i++) {
             assertArrayEquals("Cert: " + i, fallbackKeyCerts1[i].getEncoded(),
