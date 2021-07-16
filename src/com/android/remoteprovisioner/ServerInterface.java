@@ -16,6 +16,7 @@
 
 package com.android.remoteprovisioner;
 
+import android.content.Context;
 import android.util.Base64;
 import android.util.Log;
 
@@ -36,30 +37,28 @@ public class ServerInterface {
     private static final int TIMEOUT_MS = 5000;
 
     private static final String TAG = "ServerInterface";
-    private static final String PROVISIONING_URL = "https://remoteprovisioning.googleapis.com";
-    private static final String GEEK_URL = PROVISIONING_URL + "/v1alpha1:fetchEekChain";
-    private static final String CERTIFICATE_SIGNING_URL =
-            PROVISIONING_URL + "/v1alpha1:signCertificates?challenge=";
+    private static final String GEEK_URL = ":fetchEekChain";
+    private static final String CERTIFICATE_SIGNING_URL = ":signCertificates?challenge=";
 
     /**
      * Ferries the CBOR blobs returned by KeyMint to the provisioning server. The data sent to the
      * provisioning server contains the MAC'ed CSRs and encrypted bundle containing the MAC key and
      * the hardware unique public key.
      *
+     * @param context The application context which is required to use SettingsManager.
      * @param csr The CBOR encoded data containing the relevant pieces needed for the server to
      *                    sign the CSRs. The data encoded within comes from Keystore / KeyMint.
-     *
      * @param challenge The challenge that was sent from the server. It is included here even though
      *                    it is also included in `cborBlob` in order to allow the server to more
      *                    easily reject bad requests.
-     *
      * @return A List of byte arrays, where each array contains an entire DER-encoded certificate
      *                    chain for one attestation key pair.
      */
-    public static List<byte[]> requestSignedCertificates(byte[] csr, byte[] challenge) {
+    public static List<byte[]> requestSignedCertificates(Context context, byte[] csr,
+                                                         byte[] challenge) {
         try {
-            URL url = new URL(CERTIFICATE_SIGNING_URL
-                        + Base64.encodeToString(challenge, Base64.URL_SAFE));
+            URL url = new URL(SettingsManager.getUrl(context) + CERTIFICATE_SIGNING_URL
+                              + Base64.encodeToString(challenge, Base64.URL_SAFE));
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
             con.setRequestMethod("POST");
             con.setDoOutput(true);
@@ -69,15 +68,15 @@ public class ServerInterface {
             // the output stream being automatically closed.
             try (OutputStream os = con.getOutputStream()) {
                 os.write(csr, 0, csr.length);
-            } catch (Exception e) {
-                return null;
             }
 
             if (con.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                int failures = SettingsManager.incrementFailureCounter(context);
                 Log.e(TAG, "Server connection for signing failed, response code: "
-                        + con.getResponseCode());
+                        + con.getResponseCode() + "\nRepeated failure count: " + failures);
                 return null;
             }
+            SettingsManager.clearFailureCounter(context);
             BufferedInputStream inputStream = new BufferedInputStream(con.getInputStream());
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
@@ -87,9 +86,11 @@ public class ServerInterface {
             }
             return CborUtils.parseSignedCertificates(cborBytes.toByteArray());
         } catch (SocketTimeoutException e) {
+            SettingsManager.incrementFailureCounter(context);
             Log.e(TAG, "Server timed out", e);
             return null;
         } catch (IOException e) {
+            SettingsManager.incrementFailureCounter(context);
             Log.e(TAG, "Failed to request signed certificates from the server", e);
             return null;
         }
@@ -103,19 +104,30 @@ public class ServerInterface {
      *
      * A challenge is also returned from the server so that it can check freshness of the follow-up
      * request to get keys signed.
+     *
+     * @param context The application context which is required to use SettingsManager.
+     * @return A GeekResponse object which optionally contains configuration data.
      */
-    public static GeekResponse fetchGeek() {
+    public static GeekResponse fetchGeek(Context context) {
         try {
-            URL url = new URL(GEEK_URL);
+            URL url = new URL(SettingsManager.getUrl(context) + GEEK_URL);
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
-            con.setRequestMethod("GET");
+            con.setRequestMethod("POST");
             con.setConnectTimeout(TIMEOUT_MS);
+            con.setDoOutput(true);
+
+            byte[] config = CborUtils.buildProvisioningInfo(context);
+            try (OutputStream os = con.getOutputStream()) {
+                os.write(config, 0, config.length);
+            }
 
             if (con.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                int failures = SettingsManager.incrementFailureCounter(context);
                 Log.e(TAG, "Server connection for GEEK failed, response code: "
-                        + con.getResponseCode());
+                        + con.getResponseCode() + "\nRepeated failure count: " + failures);
                 return null;
             }
+            SettingsManager.clearFailureCounter(context);
 
             BufferedInputStream inputStream = new BufferedInputStream(con.getInputStream());
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
@@ -127,8 +139,11 @@ public class ServerInterface {
             inputStream.close();
             return CborUtils.parseGeekResponse(cborBytes.toByteArray());
         } catch (SocketTimeoutException e) {
+            SettingsManager.incrementFailureCounter(context);
             Log.e(TAG, "Server timed out", e);
         } catch (IOException e) {
+            // This exception will trigger on a completely malformed URL.
+            SettingsManager.incrementFailureCounter(context);
             Log.e(TAG, "Failed to fetch GEEK from the servers.", e);
         }
         return null;

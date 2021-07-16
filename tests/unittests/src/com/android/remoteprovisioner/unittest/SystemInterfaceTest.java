@@ -38,7 +38,7 @@ import android.security.remoteprovisioning.IRemoteProvisioning;
 
 import androidx.test.runner.AndroidJUnit4;
 
-import com.android.remoteprovisioner.GeekResponse;
+import com.android.remoteprovisioner.CborUtils;
 import com.android.remoteprovisioner.SystemInterface;
 import com.android.remoteprovisioner.X509Utils;
 
@@ -119,11 +119,11 @@ public class SystemInterfaceTest {
         ProtectedData encryptedBundle = new ProtectedData();
         byte[] eek = new byte[32];
         new Random().nextBytes(eek);
-        GeekResponse geek = new GeekResponse(generateEekChain(eek), new byte[] {0x02});
         byte[] bundle =
             SystemInterface.generateCsr(true /* testMode */, 0 /* numKeys */,
                                         SecurityLevel.TRUSTED_ENVIRONMENT,
-                                        geek, encryptedBundle, deviceInfo, mBinder);
+                                        generateEekChain(eek),
+                                        new byte[] {0x02}, encryptedBundle, deviceInfo, mBinder);
         // encryptedBundle should contain a COSE_Encrypt message
         ByteArrayInputStream bais = new ByteArrayInputStream(encryptedBundle.protectedData);
         List<DataItem> dataItems = new CborDecoder(bais).decode();
@@ -156,14 +156,14 @@ public class SystemInterfaceTest {
         int numKeys = 10;
         byte[] eek = new byte[32];
         new Random().nextBytes(eek);
-        GeekResponse geek = new GeekResponse(generateEekChain(eek), new byte[] {0x02});
         for (int i = 0; i < numKeys; i++) {
             mBinder.generateKeyPair(true /* testMode */, SecurityLevel.TRUSTED_ENVIRONMENT);
         }
         byte[] bundle =
             SystemInterface.generateCsr(true /* testMode */, numKeys,
                                         SecurityLevel.TRUSTED_ENVIRONMENT,
-                                        geek, encryptedBundle, deviceInfo, mBinder);
+                                        generateEekChain(eek),
+                                        new byte[] {0x02}, encryptedBundle, deviceInfo, mBinder);
         assertNotNull(bundle);
         // The return value of generateCsr should be a COSE_Mac0 message
         ByteArrayInputStream bais = new ByteArrayInputStream(bundle);
@@ -280,12 +280,12 @@ public class SystemInterfaceTest {
         int numKeys = 1;
         byte[] eekPriv = X25519.generatePrivateKey();
         byte[] eekPub = X25519.publicFromPrivate(eekPriv);
-        GeekResponse geek = new GeekResponse(generateEekChain(eekPub), new byte[] {0x02});
         mBinder.generateKeyPair(true /* testMode */, SecurityLevel.TRUSTED_ENVIRONMENT);
         byte[] bundle =
             SystemInterface.generateCsr(true /* testMode */, numKeys,
                                         SecurityLevel.TRUSTED_ENVIRONMENT,
-                                        geek, encryptedBundle, deviceInfo, mBinder);
+                                        generateEekChain(eekPub),
+                                        new byte[] {0x02}, encryptedBundle, deviceInfo, mBinder);
         ByteArrayInputStream bais = new ByteArrayInputStream(encryptedBundle.protectedData);
         List<DataItem> dataItems = new CborDecoder(bais).decode();
         // Parse encMsg into components: protected and unprotected headers, payload, and recipient
