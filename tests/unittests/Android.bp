@@ -19,6 +19,7 @@ android_test {
     name: "RemoteProvisionerUnitTests",
     srcs: ["src/**/*.java"],
     static_libs: [
+        "androidx.test.core",
         "androidx.test.rules",
         "android.security.remoteprovisioning-java",
         "platform-test-annotations",
