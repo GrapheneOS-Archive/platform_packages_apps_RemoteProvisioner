@@ -34,7 +34,7 @@ public class SettingsManager {
     public static final int EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT = 6;
     // Check for expiring certs in the next 3 days
     public static final int EXPIRING_BY_MS_DEFAULT = 1000 * 60 * 60 * 24 * 3;
-    public static final String URL_DEFAULT = "https://remoteprovisioning.googleapis.com/v1alpha1";
+    public static final String URL_DEFAULT = "https://remoteprovisioning.googleapis.com/v1";
 
     private static final String KEY_EXPIRING_BY = "expiring_by";
     private static final String KEY_EXTRA_KEYS = "extra_keys";
