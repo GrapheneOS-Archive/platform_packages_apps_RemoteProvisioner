@@ -80,6 +80,10 @@ public class SystemInterface {
                                                         secLevel,
                                                         protectedData,
                                                         deviceInfo);
+            if (macedPublicKeys == null) {
+                Log.e(TAG, "Keystore didn't generate a CSR successfully.");
+                return null;
+            }
             ByteArrayInputStream bais = new ByteArrayInputStream(macedPublicKeys);
             List<DataItem> dataItems = new CborDecoder(bais).decode();
             List<DataItem> macInfo = ((Array) dataItems.get(0)).getDataItems();
