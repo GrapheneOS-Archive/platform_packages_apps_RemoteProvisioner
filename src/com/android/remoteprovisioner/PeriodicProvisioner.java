@@ -16,9 +16,12 @@
 
 package com.android.remoteprovisioner;
 
+import static java.lang.Math.min;
+
 import android.app.job.JobParameters;
 import android.app.job.JobService;
 import android.content.Context;
+import android.net.ConnectivityManager;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.security.remoteprovisioning.AttestationPoolStatus;
@@ -36,20 +39,24 @@ import java.time.Duration;
 public class PeriodicProvisioner extends JobService {
 
     private static final int FAILURE_MAXIMUM = 5;
+    private static final int SAFE_CSR_BATCH_SIZE = 20;
 
     // How long to wait in between key pair generations to avoid flooding keystore with requests.
     private static final Duration KEY_GENERATION_PAUSE = Duration.ofMillis(1000);
+
+    // If the connection is metered when the job service is started, try to avoid provisioning.
+    private static final long METERED_CONNECTION_EXPIRATION_CHECK = Duration.ofDays(1).toMillis();
 
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String TAG = "RemoteProvisioningService";
     private ProvisionerThread mProvisionerThread;
 
     /**
-     * Starts the periodic provisioning job, which will occasionally check the attestation key pool
+     * Starts the periodic provisioning job, which will check the attestation key pool
      * and provision it as necessary.
      */
     public boolean onStartJob(JobParameters params) {
-        Log.d(TAG, "Starting provisioning job");
+        Log.i(TAG, "Starting provisioning job");
         mProvisionerThread = new ProvisionerThread(params, this);
         mProvisionerThread.start();
         return true;
@@ -59,7 +66,6 @@ public class PeriodicProvisioner extends JobService {
      * Allows the job to be stopped if need be.
      */
     public boolean onStopJob(JobParameters params) {
-        mProvisionerThread.stop();
         return false;
     }
 
@@ -74,79 +80,134 @@ public class PeriodicProvisioner extends JobService {
 
         public void run() {
             try {
-                if (SettingsManager.getExtraSignedKeysAvailable(mContext) == 0) {
-                    // Provisioning is disabled. Check with the server if it's time to turn it back
-                    // on. If not, quit.
-                    GeekResponse check = ServerInterface.fetchGeek(mContext);
-                    if (check.numExtraAttestationKeys == 0) {
-                        jobFinished(mParams, false /* wantsReschedule */);
-                        return;
-                    }
-                }
                 IRemoteProvisioning binder =
                         IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
                 if (binder == null) {
                     Log.e(TAG, "Binder returned null pointer to RemoteProvisioning service.");
-                    jobFinished(mParams, true /* wantsReschedule */);
+                    jobFinished(mParams, false /* wantsReschedule */);
                     return;
+                }
+
+                ConnectivityManager cm = (ConnectivityManager) mContext.getSystemService(
+                        Context.CONNECTIVITY_SERVICE);
+                boolean isMetered = cm.isActiveNetworkMetered();
+                long expiringBy;
+                if (isMetered) {
+                    // Check a shortened duration to attempt to avoid metered connection
+                    // provisioning.
+                    expiringBy = System.currentTimeMillis() + METERED_CONNECTION_EXPIRATION_CHECK;
+                } else {
+                    expiringBy = SettingsManager.getExpiringBy(mContext)
+                                                      .plusMillis(System.currentTimeMillis())
+                                                      .toMillis();
                 }
                 ImplInfo[] implInfos = binder.getImplementationInfo();
                 if (implInfos == null) {
                     Log.e(TAG, "No instances of IRemotelyProvisionedComponent registered in "
                                + SERVICE);
-                    jobFinished(mParams, true /* wantsReschedule */);
+                    jobFinished(mParams, false /* wantsReschedule */);
                     return;
                 }
                 int[] keysNeededForSecLevel = new int[implInfos.length];
-                boolean provisioningNeeded = false;
-                for (int i = 0; i < implInfos.length; i++) {
-                    keysNeededForSecLevel[i] =
-                            generateNumKeysNeeded(binder,
-                                       SettingsManager.getExpiringBy(mContext)
-                                                      .plusMillis(System.currentTimeMillis())
-                                                      .toMillis(),
-                                       implInfos[i].secLevel);
-                    if (keysNeededForSecLevel[i] > 0) {
-                        provisioningNeeded = true;
-                    }
-                }
-                if (provisioningNeeded) {
-                    GeekResponse resp = ServerInterface.fetchGeek(mContext);
-                    if (resp == null) {
-                        if (SettingsManager.getFailureCounter(mContext) > FAILURE_MAXIMUM) {
-                            SettingsManager.clearPreferences(mContext);
+                boolean provisioningNeeded =
+                        isProvisioningNeeded(binder, expiringBy, implInfos, keysNeededForSecLevel);
+                GeekResponse resp = null;
+                if (!provisioningNeeded) {
+                    if (!isMetered) {
+                        // So long as the connection is unmetered, go ahead and grab an updated
+                        // device configuration file.
+                        resp = ServerInterface.fetchGeek(mContext);
+                        if (!checkGeekResp(resp)) {
+                            jobFinished(mParams, false /* wantsReschedule */);
+                            return;
                         }
-                        jobFinished(mParams, true /* wantsReschedule */);
-                        return;
+                        SettingsManager.setDeviceConfig(mContext,
+                                resp.numExtraAttestationKeys,
+                                resp.timeToRefresh,
+                                resp.provisioningUrl);
+                        if (resp.numExtraAttestationKeys == 0) {
+                            binder.deleteAllKeys();
+                        }
                     }
-                    // Updates to configuration will take effect on the next check.
-                    SettingsManager.setDeviceConfig(mContext,
-                                                    resp.numExtraAttestationKeys,
-                                                    resp.timeToRefresh,
-                                                    resp.provisioningUrl);
-                    if (resp.numExtraAttestationKeys == 0) {
-                        // If the server has sent this, deactivate RKP.
-                        binder.deleteAllKeys();
-                        jobFinished(mParams, false /* wantsReschedule */);
-                        return;
-                    }
-                    for (int i = 0; i < implInfos.length; i++) {
-                        Provisioner.provisionCerts(keysNeededForSecLevel[i],
+                    jobFinished(mParams, false /* wantsReschedule */);
+                    return;
+                }
+                resp = ServerInterface.fetchGeek(mContext);
+                if (!checkGeekResp(resp)) {
+                    jobFinished(mParams, false /* wantsReschedule */);
+                    return;
+                }
+                SettingsManager.setDeviceConfig(mContext,
+                            resp.numExtraAttestationKeys,
+                            resp.timeToRefresh,
+                            resp.provisioningUrl);
+
+                if (resp.numExtraAttestationKeys == 0) {
+                    // Provisioning is disabled. Check with the server if it's time to turn it back
+                    // on. If not, quit. Avoid checking if the connection is metered. Opt instead
+                    // to just continue using the fallback factory provisioned key.
+                    binder.deleteAllKeys();
+                    jobFinished(mParams, false /* wantsReschedule */);
+                    return;
+                }
+                for (int i = 0; i < implInfos.length; i++) {
+                    // Break very large CSR requests into chunks, so as not to overwhelm the
+                    // backend.
+                    int keysToCertify = keysNeededForSecLevel[i];
+                    while (keysToCertify != 0) {
+                        int batchSize = min(keysToCertify, SAFE_CSR_BATCH_SIZE);
+                        Provisioner.provisionCerts(batchSize,
                                                    implInfos[i].secLevel,
                                                    resp.getGeekChain(implInfos[i].supportedCurve),
                                                    resp.getChallenge(),
                                                    binder,
                                                    mContext);
+                        keysToCertify -= batchSize;
                     }
                 }
                 jobFinished(mParams, false /* wantsReschedule */);
             } catch (RemoteException e) {
-                jobFinished(mParams, true /* wantsReschedule */);
+                jobFinished(mParams, false /* wantsReschedule */);
                 Log.e(TAG, "Error on the binder side during provisioning.", e);
             } catch (InterruptedException e) {
-                jobFinished(mParams, true /* wantsReschedule */);
+                jobFinished(mParams, false /* wantsReschedule */);
                 Log.e(TAG, "Provisioner thread interrupted.", e);
             }
+        }
+
+        private boolean checkGeekResp(GeekResponse resp) {
+            if (resp == null) {
+                Log.e(TAG, "Failed to get a response from the server.");
+                if (SettingsManager.getFailureCounter(mContext) > FAILURE_MAXIMUM) {
+                    Log.e(TAG, "Too many failures, resetting defaults.");
+                    SettingsManager.clearPreferences(mContext);
+                }
+                jobFinished(mParams, false /* wantsReschedule */);
+                return false;
+            }
+            return true;
+        }
+
+        private boolean isProvisioningNeeded(
+                IRemoteProvisioning binder, long expiringBy, ImplInfo[] implInfos,
+                int[] keysNeededForSecLevel)
+                throws InterruptedException, RemoteException {
+            if (implInfos == null || keysNeededForSecLevel == null
+                || keysNeededForSecLevel.length != implInfos.length) {
+                Log.e(TAG, "Invalid argument.");
+                return false;
+            }
+            boolean provisioningNeeded = false;
+            for (int i = 0; i < implInfos.length; i++) {
+                keysNeededForSecLevel[i] =
+                        generateNumKeysNeeded(binder,
+                                   expiringBy,
+                                   implInfos[i].secLevel);
+                if (keysNeededForSecLevel[i] > 0) {
+                    provisioningNeeded = true;
+                }
+            }
+            return provisioningNeeded;
         }
 
         /**
@@ -164,12 +225,19 @@ public class PeriodicProvisioner extends JobService {
                 throws InterruptedException, RemoteException {
             AttestationPoolStatus pool = binder.getPoolStatus(expiringBy, secLevel);
             int unattestedKeys = pool.total - pool.attested;
-            int validKeys = pool.attested - pool.expiring;
             int keysInUse = pool.attested - pool.unassigned;
             int totalSignedKeys = keysInUse + SettingsManager.getExtraSignedKeysAvailable(mContext);
             int generated;
+            // If nothing is expiring, and the amount of available unassigned keys is sufficient,
+            // then do nothing. Otherwise, generate the complete amount of totalSignedKeys. It will
+            // reduce network usage if the app just provisions an entire new batch in one go, rather
+            // than consistently grabbing just a few at a time as the expiration dates become
+            // misaligned.
+            if (pool.expiring > pool.unassigned && pool.attested == totalSignedKeys) {
+                return 0;
+            }
             for (generated = 0;
-                    generated + unattestedKeys + validKeys < totalSignedKeys; generated++) {
+                    generated + unattestedKeys < totalSignedKeys; generated++) {
                 binder.generateKeyPair(false /* isTestMode */, secLevel);
                 // Prioritize provisioning if there are no keys available. No keys being available
                 // indicates that this is the first time a device is being brought online.
@@ -177,7 +245,7 @@ public class PeriodicProvisioner extends JobService {
                     Thread.sleep(KEY_GENERATION_PAUSE.toMillis());
                 }
             }
-            if (totalSignedKeys - validKeys > 0) {
+            if (totalSignedKeys > 0) {
                 return generated + unattestedKeys;
             }
             return 0;
