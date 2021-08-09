@@ -16,8 +16,11 @@
 
 package com.android.remoteprovisioner;
 
+import android.util.Log;
+
 import java.io.ByteArrayInputStream;
 import java.math.BigInteger;
+import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -29,6 +32,8 @@ import java.util.ArrayList;
  * Provides convenience methods for parsing certificates and extracting information.
  */
 public class X509Utils {
+
+    private static final String TAG = "RemoteProvisionerX509Utils";
 
     /**
      * Takes a byte array composed of DER encoded certificates and returns the X.509 certificates
@@ -47,6 +52,11 @@ public class X509Utils {
      * the certificate chain to the proper key when passed into the keystore database.
      */
     public static byte[] getAndFormatRawPublicKey(X509Certificate cert) {
+        PublicKey pubKey = cert.getPublicKey();
+        if (!(pubKey instanceof ECPublicKey)) {
+            Log.e(TAG, "Certificate public key is not an instance of ECPublicKey");
+            return null;
+        }
         ECPublicKey key = (ECPublicKey) cert.getPublicKey();
         // Remote key provisioning internally supports the default, uncompressed public key
         // format for ECDSA. This defines the format as (s | x | y), where s is the byte
