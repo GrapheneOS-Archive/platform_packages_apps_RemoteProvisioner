@@ -86,10 +86,11 @@ public class GenerateRkpKeyService extends Service {
                     break;
                 }
             }
-            // If there are no unassigned keys, go ahead and provision some. If there are no keys
-            // at all on system, this implies that it is a hybrid rkp/factory-provisioned system
-            // that has turned off RKP. In that case, do not provision.
-            if (pool.unassigned == 0 && pool.total != 0) {
+            // If there are no unassigned keys, go ahead and provision some. If there are no
+            // attested keys at all on the system, this implies that it is a hybrid
+            // rkp/factory-provisioned system that has turned off RKP. In that case, do
+            // not provision.
+            if (pool.unassigned == 0 && pool.attested != 0) {
                 Log.i(TAG, "All signed keys are currently in use, provisioning more.");
                 Context context = getApplicationContext();
                 int keysToProvision = SettingsManager.getExtraSignedKeysAvailable(context);
