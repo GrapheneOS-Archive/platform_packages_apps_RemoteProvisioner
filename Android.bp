@@ -29,6 +29,7 @@ android_app {
     static_libs: [
         "android.hardware.security.keymint-V1-java",
         "android.security.remoteprovisioning-java",
+        "androidx.work_work-runtime",
         "cbor-java",
     ],
     resource_dirs: ["res"],
