@@ -29,6 +29,7 @@ import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.util.Log;
 
 import androidx.work.Constraints;
+import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
@@ -74,8 +75,10 @@ public class BootReceiver extends BroadcastReceiver {
                         .setConstraints(constraints)
                         .build();
         WorkManager
-            .getInstance(context)
-            .enqueue(workRequest);
+                .getInstance(context)
+                .enqueueUniquePeriodicWork("ProvisioningJob",
+                                       ExistingPeriodicWorkPolicy.REPLACE, // Replace on reboot.
+                                       workRequest);
     }
 
     private int calcNumPotentialKeysToDownload() {
