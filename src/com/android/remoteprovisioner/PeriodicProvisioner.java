@@ -134,18 +134,9 @@ public class PeriodicProvisioner extends Worker {
             for (int i = 0; i < implInfos.length; i++) {
                 // Break very large CSR requests into chunks, so as not to overwhelm the
                 // backend.
-                int keysToCertify = keysNeededForSecLevel[i];
-                while (keysToCertify != 0) {
-                    int batchSize = min(keysToCertify, SAFE_CSR_BATCH_SIZE);
-                    Log.i(TAG, "Requesting " + batchSize + " keys to be provisioned.");
-                    Provisioner.provisionCerts(batchSize,
-                                               implInfos[i].secLevel,
-                                               resp.getGeekChain(implInfos[i].supportedCurve),
-                                               resp.getChallenge(),
-                                               binder,
-                                               mContext);
-                    keysToCertify -= batchSize;
-                }
+                int keysToProvision = keysNeededForSecLevel[i];
+                batchProvision(binder, mContext, keysToProvision, implInfos[i].secLevel,
+                               resp.getGeekChain(implInfos[i].supportedCurve), resp.getChallenge());
             }
             return Result.success();
         } catch (RemoteException e) {
@@ -154,6 +145,23 @@ public class PeriodicProvisioner extends Worker {
         } catch (InterruptedException e) {
             Log.e(TAG, "Provisioner thread interrupted.", e);
             return Result.failure();
+        }
+    }
+
+    public static void batchProvision(IRemoteProvisioning binder, Context context,
+                               int keysToProvision, int secLevel,
+                               byte[] geekChain, byte[] challenge)
+                               throws RemoteException {
+        while (keysToProvision != 0) {
+            int batchSize = min(keysToProvision, SAFE_CSR_BATCH_SIZE);
+            Log.i(TAG, "Requesting " + batchSize + " keys to be provisioned.");
+            Provisioner.provisionCerts(batchSize,
+                                       secLevel,
+                                       geekChain,
+                                       challenge,
+                                       binder,
+                                       context);
+            keysToProvision -= batchSize;
         }
     }
 
@@ -182,6 +190,7 @@ public class PeriodicProvisioner extends Worker {
         for (int i = 0; i < implInfos.length; i++) {
             keysNeededForSecLevel[i] =
                     generateNumKeysNeeded(binder,
+                               mContext,
                                expiringBy,
                                implInfos[i].secLevel);
             if (keysNeededForSecLevel[i] > 0) {
@@ -202,7 +211,8 @@ public class PeriodicProvisioner extends Worker {
      * This allows devices to dynamically resize their key pools as the user downloads and
      * removes apps that may also use attestation.
      */
-    private int generateNumKeysNeeded(IRemoteProvisioning binder, long expiringBy, int secLevel)
+    public static int generateNumKeysNeeded(IRemoteProvisioning binder, Context context,
+                                            long expiringBy, int secLevel)
             throws InterruptedException, RemoteException {
         AttestationPoolStatus pool =
                 SystemInterface.getPoolStatus(expiringBy, secLevel, binder);
@@ -214,22 +224,15 @@ public class PeriodicProvisioner extends Worker {
                    + "\nAttested: " + pool.attested
                    + "\nUnassigned: " + pool.unassigned
                    + "\nExpiring: " + pool.expiring);
-        int unattestedKeys = pool.total - pool.attested;
-        int keysInUse = pool.attested - pool.unassigned;
-        int totalSignedKeys = keysInUse + SettingsManager.getExtraSignedKeysAvailable(mContext);
-        int generated;
-        // If nothing is expiring, and the amount of available unassigned keys is sufficient,
-        // then do nothing. Otherwise, generate the complete amount of totalSignedKeys. It will
-        // reduce network usage if the app just provisions an entire new batch in one go, rather
-        // than consistently grabbing just a few at a time as the expiration dates become
-        // misaligned.
-        if (pool.expiring < pool.unassigned && pool.attested >= totalSignedKeys) {
-            Log.i(TAG,
-                    "No keys expiring and the expected number of attested keys are available");
+        StatsProcessor.PoolStats stats = StatsProcessor.processPool(
+                    pool, SettingsManager.getExtraSignedKeysAvailable(context));
+        if (!stats.provisioningNeeded) {
+            Log.i(TAG, "No provisioning needed.");
             return 0;
         }
-        for (generated = 0;
-                generated + unattestedKeys < totalSignedKeys; generated++) {
+        Log.i(TAG, "Need to generate " + stats.keysToGenerate + " keys.");
+        int generated;
+        for (generated = 0; generated < stats.keysToGenerate; generated++) {
             SystemInterface.generateKeyPair(false /* isTestMode */, secLevel, binder);
             // Prioritize provisioning if there are no keys available. No keys being available
             // indicates that this is the first time a device is being brought online.
@@ -237,12 +240,10 @@ public class PeriodicProvisioner extends Worker {
                 Thread.sleep(KEY_GENERATION_PAUSE.toMillis());
             }
         }
-        if (totalSignedKeys > 0) {
-            Log.i(TAG, "Generated " + generated + " keys. "
-                    + (generated + unattestedKeys) + " keys are now available for signing.");
-            return generated + unattestedKeys;
-        }
-        Log.i(TAG, "No keys generated.");
-        return 0;
+        Log.i(TAG, "Generated " + generated + " keys. " + stats.unattestedKeys
+                    + " keys were also available for signing previous to generation.");
+        return stats.idealTotalSignedKeys;
     }
+
+
 }
