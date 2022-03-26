@@ -200,7 +200,7 @@ public class SystemInterfaceTest {
             SystemInterface.provisionCertChain(X509Utils.getAndFormatRawPublicKey(certChain[i][0]),
                                                certChain[i][0].getEncoded() /* leafCert */,
                                                os.toByteArray() /* certChain */,
-                                               System.currentTimeMillis() + 2000 /* validity */,
+                                               System.currentTimeMillis() + 25000 /* validity */,
                                                SecurityLevel.TRUSTED_ENVIRONMENT,
                                                mBinder);
         }

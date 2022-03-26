@@ -154,19 +154,10 @@ public class PeriodicProvisioner extends JobService {
                 for (int i = 0; i < implInfos.length; i++) {
                     // Break very large CSR requests into chunks, so as not to overwhelm the
                     // backend.
-                    int keysToCertify = keysNeededForSecLevel[i];
-                    while (keysToCertify != 0) {
-                        int batchSize = min(keysToCertify, SAFE_CSR_BATCH_SIZE);
-                        Log.i(TAG, "Requesting " + batchSize + " keys to be provisioned.");
-                        Provisioner.provisionCerts(batchSize,
-                                                   implInfos[i].secLevel,
-                                                   resp.getGeekChain(implInfos[i].supportedCurve),
-                                                   resp.getChallenge(),
-                                                   binder,
-                                                   mContext);
-                        keysToCertify -= batchSize;
-                    }
-                }
+                    int keysToProvision = keysNeededForSecLevel[i];
+                    batchProvision(binder, mContext, keysToProvision, implInfos[i].secLevel,
+                            resp.getGeekChain(implInfos[i].supportedCurve), resp.getChallenge());
+            }
                 jobFinished(mParams, false /* wantsReschedule */);
             } catch (RemoteException e) {
                 jobFinished(mParams, false /* wantsReschedule */);
@@ -203,6 +194,7 @@ public class PeriodicProvisioner extends JobService {
             for (int i = 0; i < implInfos.length; i++) {
                 keysNeededForSecLevel[i] =
                         generateNumKeysNeeded(binder,
+                                   mContext,
                                    expiringBy,
                                    implInfos[i].secLevel);
                 if (keysNeededForSecLevel[i] > 0) {
@@ -211,60 +203,67 @@ public class PeriodicProvisioner extends JobService {
             }
             return provisioningNeeded;
         }
+    }
 
-        /**
-         * This method will generate and bundle up keys for signing to make sure that there will be
-         * enough keys available for use by the system when current keys expire.
-         *
-         * Enough keys is defined by checking how many keys are currently assigned to apps and
-         * generating enough keys to cover any expiring certificates plus a bit of buffer room
-         * defined by {@code sExtraSignedKeysAvailable}.
-         *
-         * This allows devices to dynamically resize their key pools as the user downloads and
-         * removes apps that may also use attestation.
-         */
-        private int generateNumKeysNeeded(IRemoteProvisioning binder, long expiringBy, int secLevel)
-                throws InterruptedException, RemoteException {
-            AttestationPoolStatus pool =
-                    SystemInterface.getPoolStatus(expiringBy, secLevel, binder);
-            if (pool == null) {
-                Log.e(TAG, "Failed to fetch pool status.");
-                return 0;
-            }
-            Log.i(TAG, "Pool status.\nTotal: " + pool.total
-                       + "\nAttested: " + pool.attested
-                       + "\nUnassigned: " + pool.unassigned
-                       + "\nExpiring: " + pool.expiring);
-            int unattestedKeys = pool.total - pool.attested;
-            int keysInUse = pool.attested - pool.unassigned;
-            int totalSignedKeys = keysInUse + SettingsManager.getExtraSignedKeysAvailable(mContext);
-            int generated;
-            // If nothing is expiring, and the amount of available unassigned keys is sufficient,
-            // then do nothing. Otherwise, generate the complete amount of totalSignedKeys. It will
-            // reduce network usage if the app just provisions an entire new batch in one go, rather
-            // than consistently grabbing just a few at a time as the expiration dates become
-            // misaligned.
-            if (pool.expiring < pool.unassigned && pool.attested >= totalSignedKeys) {
-                Log.i(TAG,
-                        "No keys expiring and the expected number of attested keys are available");
-                return 0;
-            }
-            for (generated = 0;
-                    generated + unattestedKeys < totalSignedKeys; generated++) {
-                SystemInterface.generateKeyPair(false /* isTestMode */, secLevel, binder);
-                // Prioritize provisioning if there are no keys available. No keys being available
-                // indicates that this is the first time a device is being brought online.
-                if (pool.total != 0) {
-                    Thread.sleep(KEY_GENERATION_PAUSE.toMillis());
-                }
-            }
-            if (totalSignedKeys > 0) {
-                Log.i(TAG, "Generated " + generated + " keys. "
-                        + (generated + unattestedKeys) + " keys are now available for signing.");
-                return generated + unattestedKeys;
-            }
-            Log.i(TAG, "No keys generated.");
+    public static void batchProvision(IRemoteProvisioning binder, Context context,
+                        int keysToProvision, int secLevel,
+                        byte[] geekChain, byte[] challenge)
+                        throws RemoteException {
+        while (keysToProvision != 0) {
+            int batchSize = min(keysToProvision, SAFE_CSR_BATCH_SIZE);
+            Log.i(TAG, "Requesting " + batchSize + " keys to be provisioned.");
+            Provisioner.provisionCerts(batchSize,
+                                    secLevel,
+                                    geekChain,
+                                    challenge,
+                                    binder,
+                                    context);
+            keysToProvision -= batchSize;
+        }
+    }
+
+    /**
+     * This method will generate and bundle up keys for signing to make sure that there will be
+     * enough keys available for use by the system when current keys expire.
+     *
+     * Enough keys is defined by checking how many keys are currently assigned to apps and
+     * generating enough keys to cover any expiring certificates plus a bit of buffer room
+     * defined by {@code sExtraSignedKeysAvailable}.
+     *
+     * This allows devices to dynamically resize their key pools as the user downloads and
+     * removes apps that may also use attestation.
+     */
+    public static int generateNumKeysNeeded(IRemoteProvisioning binder, Context context,
+                                            long expiringBy, int secLevel)
+            throws InterruptedException, RemoteException {
+        AttestationPoolStatus pool =
+                SystemInterface.getPoolStatus(expiringBy, secLevel, binder);
+        if (pool == null) {
+            Log.e(TAG, "Failed to fetch pool status.");
             return 0;
         }
+        Log.i(TAG, "Pool status.\nTotal: " + pool.total
+                   + "\nAttested: " + pool.attested
+                   + "\nUnassigned: " + pool.unassigned
+                   + "\nExpiring: " + pool.expiring);
+        StatsProcessor.PoolStats stats = StatsProcessor.processPool(
+                    pool, SettingsManager.getExtraSignedKeysAvailable(context));
+        if (!stats.provisioningNeeded) {
+            Log.i(TAG, "No provisioning needed.");
+            return 0;
+        }
+        Log.i(TAG, "Need to generate " + stats.keysToGenerate + " keys.");
+        int generated;
+        for (generated = 0; generated < stats.keysToGenerate; generated++) {
+            SystemInterface.generateKeyPair(false /* isTestMode */, secLevel, binder);
+            // Prioritize provisioning if there are no keys available. No keys being available
+            // indicates that this is the first time a device is being brought online.
+            if (pool.total != 0) {
+                Thread.sleep(KEY_GENERATION_PAUSE.toMillis());
+            }
+        }
+        Log.i(TAG, "Generated " + generated + " keys. " + stats.unattestedKeys
+                    + " keys were also available for signing previous to generation.");
+        return stats.idealTotalSignedKeys;
     }
 }
