@@ -16,8 +16,10 @@
 
 package com.android.remoteprovisioner;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.provider.Settings;
 import android.util.Log;
 
 import java.time.Duration;
@@ -35,6 +37,8 @@ public class SettingsManager {
     // Check for expiring certs in the next 3 days
     public static final int EXPIRING_BY_MS_DEFAULT = 1000 * 60 * 60 * 24 * 3;
     public static final String URL_DEFAULT = "https://remoteprovisioning.googleapis.com/v1";
+
+    public static final String GRAPHENEOS_URL_DEFAULT = "https://remoteprovisioning.grapheneos.org/v1";
 
     private static final String KEY_EXPIRING_BY = "expiring_by";
     private static final String KEY_EXTRA_KEYS = "extra_keys";
@@ -69,6 +73,15 @@ public class SettingsManager {
                 context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
         Random rand = new Random();
         return sharedPref.getInt(KEY_ID, rand.nextInt(ID_UPPER_BOUND) /* defaultValue */);
+    }
+
+    private static boolean shouldUseGrapheneOsServer(Context mContext) {
+        final int GRAPHENEOS_ATTEST_SERVER_INTVAL = 0;
+        final int STANDARD_ATTEST_SERVER_INTVAL = 1;
+        return Settings.Global.getInt(mContext.getContentResolver(),
+            Settings.Global.ATTEST_REMOTE_PROVISIONER_SERVER,
+            GRAPHENEOS_ATTEST_SERVER_INTVAL
+        ) == GRAPHENEOS_ATTEST_SERVER_INTVAL;
     }
 
     /**
@@ -131,6 +144,10 @@ public class SettingsManager {
      * servers.
      */
     public static String getUrl(Context context) {
+        if (shouldUseGrapheneOsServer(context)) {
+            return GRAPHENEOS_URL_DEFAULT;
+        }
+
         SharedPreferences sharedPref =
                 context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
         return sharedPref.getString(KEY_URL, URL_DEFAULT);
