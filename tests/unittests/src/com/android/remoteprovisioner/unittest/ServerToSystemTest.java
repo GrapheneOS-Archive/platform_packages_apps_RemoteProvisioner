@@ -140,14 +140,16 @@ public class ServerToSystemTest {
     @Test
     public void testFallback() throws Exception {
         // Feed a fake URL into the device config to ensure that remote provisioning fails.
-        SettingsManager.setDeviceConfig(sContext, 2 /* extraKeys */, mDuration /* expiringBy */,
+        SettingsManager.setDeviceConfig(sContext, 1 /* extraKeys */, mDuration /* expiringBy */,
                                         "Not even a URL" /* url */);
         int numTestKeys = 1;
         assertPoolStatus(0, 0, 0, 0, mDuration);
+        // Note that due to the GenerateRkpKeyService, this call to generate an attested key will
+        // still cause the service to generate keys up the number specified as `extraKeys` in the
+        // `setDeviceConfig`. This will provide us 1 key for the followup call to provisionCerts.
         Certificate[] fallbackKeyCerts1 = generateKeyStoreKey("test1");
 
         SettingsManager.clearPreferences(sContext);
-        sBinder.generateKeyPair(IS_TEST_MODE, TRUSTED_ENVIRONMENT);
         GeekResponse geek = ServerInterface.fetchGeek(sContext);
         int numProvisioned =
                 Provisioner.provisionCerts(numTestKeys, TRUSTED_ENVIRONMENT,
