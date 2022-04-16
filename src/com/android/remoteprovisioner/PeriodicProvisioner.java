@@ -23,8 +23,8 @@ import android.net.ConnectivityManager;
 import android.os.RemoteException;
 import android.os.ServiceManager;
 import android.security.remoteprovisioning.AttestationPoolStatus;
-import android.security.remoteprovisioning.ImplInfo;
 import android.security.remoteprovisioning.IRemoteProvisioning;
+import android.security.remoteprovisioning.ImplInfo;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -233,7 +233,7 @@ public class PeriodicProvisioner extends Worker {
         Log.i(TAG, "Need to generate " + stats.keysToGenerate + " keys.");
         int generated;
         for (generated = 0; generated < stats.keysToGenerate; generated++) {
-            SystemInterface.generateKeyPair(false /* isTestMode */, secLevel, binder);
+            SystemInterface.generateKeyPair(SettingsManager.isTestMode(), secLevel, binder);
             // Prioritize provisioning if there are no keys available. No keys being available
             // indicates that this is the first time a device is being brought online.
             if (pool.total != 0) {
