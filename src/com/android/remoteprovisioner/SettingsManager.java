@@ -35,6 +35,7 @@ public class SettingsManager {
     // Check for expiring certs in the next 3 days
     public static final int EXPIRING_BY_MS_DEFAULT = 1000 * 60 * 60 * 24 * 3;
     public static final String URL_DEFAULT = "https://remoteprovisioning.googleapis.com/v1";
+    public static final boolean IS_TEST_MODE = false;
 
     private static final String KEY_EXPIRING_BY = "expiring_by";
     private static final String KEY_EXTRA_KEYS = "extra_keys";
@@ -184,5 +185,13 @@ public class SettingsManager {
         SharedPreferences.Editor editor = sharedPref.edit();
         editor.clear();
         editor.apply();
+    }
+
+    /**
+     * Checks whether RKP is in test mode.
+     * @return true if device is in test mode, false otherwise.
+     */
+    public static boolean isTestMode() {
+        return IS_TEST_MODE;
     }
 }
