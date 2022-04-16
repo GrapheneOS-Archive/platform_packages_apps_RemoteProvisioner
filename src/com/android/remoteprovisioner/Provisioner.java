@@ -69,9 +69,8 @@ public class Provisioner {
         }
         DeviceInfo deviceInfo = new DeviceInfo();
         ProtectedData protectedData = new ProtectedData();
-        byte[] macedKeysToSign =
-                SystemInterface.generateCsr(false /* testMode */, numKeys, secLevel, geekChain,
-                                            challenge, protectedData, deviceInfo, binder);
+        byte[] macedKeysToSign = SystemInterface.generateCsr(SettingsManager.isTestMode(), numKeys,
+                secLevel, geekChain, challenge, protectedData, deviceInfo, binder);
         if (macedKeysToSign == null || protectedData.protectedData == null
                 || deviceInfo.deviceInfo == null) {
             Log.e(TAG, "Keystore failed to generate a payload");
