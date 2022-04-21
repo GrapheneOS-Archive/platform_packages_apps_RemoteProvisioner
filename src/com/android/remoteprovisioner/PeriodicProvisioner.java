@@ -28,7 +28,6 @@ import android.security.remoteprovisioning.ImplInfo;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
-import androidx.work.ListenableWorker.Result;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
@@ -102,9 +101,6 @@ public class PeriodicProvisioner extends Worker {
                     // So long as the connection is unmetered, go ahead and grab an updated
                     // device configuration file.
                     resp = ServerInterface.fetchGeek(mContext);
-                    if (!checkGeekResp(resp)) {
-                        return Result.failure();
-                    }
                     SettingsManager.setDeviceConfig(mContext,
                             resp.numExtraAttestationKeys,
                             resp.timeToRefresh,
@@ -116,9 +112,6 @@ public class PeriodicProvisioner extends Worker {
                 return Result.success();
             }
             resp = ServerInterface.fetchGeek(mContext);
-            if (!checkGeekResp(resp)) {
-                return Result.failure();
-            }
             SettingsManager.setDeviceConfig(mContext,
                         resp.numExtraAttestationKeys,
                         resp.timeToRefresh,
@@ -145,13 +138,20 @@ public class PeriodicProvisioner extends Worker {
         } catch (InterruptedException e) {
             Log.e(TAG, "Provisioner thread interrupted.", e);
             return Result.failure();
+        } catch (RemoteProvisioningException e) {
+            Log.e(TAG, "Encountered RemoteProvisioningException", e);
+            if (SettingsManager.getFailureCounter(mContext) > FAILURE_MAXIMUM) {
+                Log.e(TAG, "Too many failures, resetting defaults.");
+                SettingsManager.clearPreferences(mContext);
+            }
+            return Result.failure();
         }
     }
 
     public static void batchProvision(IRemoteProvisioning binder, Context context,
                                int keysToProvision, int secLevel,
                                byte[] geekChain, byte[] challenge)
-                               throws RemoteException {
+            throws RemoteException, RemoteProvisioningException {
         while (keysToProvision != 0) {
             int batchSize = min(keysToProvision, SAFE_CSR_BATCH_SIZE);
             Log.i(TAG, "Requesting " + batchSize + " keys to be provisioned.");
@@ -163,18 +163,6 @@ public class PeriodicProvisioner extends Worker {
                                        context);
             keysToProvision -= batchSize;
         }
-    }
-
-    private boolean checkGeekResp(GeekResponse resp) {
-        if (resp == null) {
-            Log.e(TAG, "Failed to get a response from the server.");
-            if (SettingsManager.getFailureCounter(mContext) > FAILURE_MAXIMUM) {
-                Log.e(TAG, "Too many failures, resetting defaults.");
-                SettingsManager.clearPreferences(mContext);
-            }
-            return false;
-        }
-        return true;
     }
 
     private boolean isProvisioningNeeded(
