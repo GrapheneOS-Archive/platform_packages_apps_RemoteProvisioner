@@ -22,6 +22,7 @@ android_test {
         "androidx.test.core",
         "androidx.test.rules",
         "android.security.remoteprovisioning-java",
+        "libnanohttpd",
         "platform-test-annotations",
         "ub-uiautomator",
         "cbor-java",
