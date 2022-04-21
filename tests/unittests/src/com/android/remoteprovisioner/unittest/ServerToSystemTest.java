@@ -31,11 +31,13 @@ import android.os.ParcelFileDescriptor;
 import android.os.ServiceManager;
 import android.os.SystemProperties;
 import android.security.KeyStoreException;
+import android.security.NetworkSecurityPolicy;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.remoteprovisioning.AttestationPoolStatus;
 import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.security.remoteprovisioning.ImplInfo;
 import android.system.keystore2.ResponseCode;
+import android.util.Base64;
 
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -54,6 +56,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
@@ -62,12 +65,34 @@ import java.security.cert.Certificate;
 import java.time.Duration;
 import java.util.Arrays;
 
+import fi.iki.elonen.NanoHTTPD;
+
 @RunWith(AndroidJUnit4.class)
 public class ServerToSystemTest {
 
     private static final boolean IS_TEST_MODE = false;
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String RKP_ONLY_PROP = "remote_provisioning.tee.rkp_only";
+
+    private static final byte[] GEEK_RESPONSE = Base64.decode(
+            "g4KCAYOEQ6EBJqBYTaUBAgMmIAEhWCD3FIrbl/TMU+/SZBHE43UfZh+kcQxsz/oJRoB0h1TyrSJY"
+                    + "IF5/W/bs5PYZzP8TN/0PociT2xgGdsRd5tdqd4bDLa+PWEAvl45C+74HLZVHhUeTQLAf1JtHpMRE"
+                    + "qfKhB4cQx5/LEfS/n+g74Oc0TBX8e8N+MwX00TQ87QIEYHoV4HnTiv8khEOhASagWE2lAQIDJiAB"
+                    + "IVggUYCsz4+WjOwPUOGpG7eQhjSL48OsZQJNtPYxDghGMjkiWCBU65Sd/ra05HM6JU4vH52dvfpm"
+                    + "wRGL6ZaMQ+Qw9tp2q1hAmDj7NDpl23OYsSeiFXTyvgbnjSJO3fC/wgF0xLcpayQctdjSZvpE7/Uw"
+                    + "LAR07ejGYNrOn1ZXJ3Qh096Tj+O4zYRDoQEmoFhxpgECAlggg5/4/RAcEp+SQcdbjeRO9BkTmscb"
+                    + "bacOlfJkU12nHcEDOBggASFYIBakUhJjs4ZWUNjf8qCofbzZbqdoYOqMXPGT5ZcZDazeIlggib7M"
+                    + "bD9esDk0r5e6ONEWHaHMHWTTjEhO+HKBGzs+Me5YQPrazy2rpTAMc8Xlq0mSWWBE+sTyM+UEsmwZ"
+                    + "ZOkc42Q7NIYAZS313a+qAcmvg8lO+FqU6GWTUeMYHjmAp2lLM82CAoOEQ6EBJ6BYKqQBAQMnIAYh"
+                    + "WCCZue7dXuRS9oXGTGLcPmGrV0h9dTcprXaAMtKzy2NY2VhAHiIIS6S3pMjXTgMO/rivFEynO2+l"
+                    + "zdzaecYrZP6ZOa9254D6ZgCFDQeYKqyRXKclFEkGNHXKiid62eNaSesCA4RDoQEnoFgqpAEBAycg"
+                    + "BiFYIOovhQ6eagxc973Z+igyv9pV6SCiUQPJA5MYzqAVKezRWECCa8ddpjZXt8dxEq0cwmqzLCMq"
+                    + "3RQwy4IUtonF0x4xu7hQIUpJTbqRDG8zTYO8WCsuhNvFWQ+YYeLB6ony0K4EhEOhASegWE6lAQEC"
+                    + "WCBvktEEbXHYp46I2NFWgV+W0XiD5jAbh+2/INFKO/5qLgM4GCAEIVggtl0cS5qDOp21FVk3oSb7"
+                    + "D9/nnKwB1aTsyDopAIhYJTlYQICyn9Aynp1K/rAl8sLSImhGxiCwqugWrGShRYObzElUJX+rFgVT"
+                    + "8L01k/PGu1lOXvneIQcUo7ako4uPgpaWugNYHQAAAYBINcxrASC0rWP9VTSO7LdABvcdkv7W2vh+"
+                    + "onV0aW1lX3RvX3JlZnJlc2hfaG91cnMYSHgabnVtX2V4dHJhX2F0dGVzdGF0aW9uX2tleXMU",
+            Base64.DEFAULT);
 
     private static Context sContext;
     private static IRemoteProvisioning sBinder;
@@ -255,6 +280,69 @@ public class ServerToSystemTest {
                     keyStoreException.getRetryPolicy());
         } finally {
             setAirplaneMode(false);
+        }
+    }
+
+    @Test
+    public void testRetryNeverWhenDeviceNotRegistered() throws Exception {
+        final NanoHTTPD server = new NanoHTTPD("localhost", 0) {
+            @Override
+            public Response serve(IHTTPSession session) {
+                // We must consume all bytes in the request, else they get interpreted as a
+                // sepearate (bad) request by the HTTP server.
+                consumeRequestBody((HTTPSession) session);
+                if (session.getUri().contains(":fetchEekChain")) {
+                    return newFixedLengthResponse(Response.Status.OK, "application/cbor",
+                            new ByteArrayInputStream(GEEK_RESPONSE), GEEK_RESPONSE.length);
+                } else if (session.getUri().contains(":signCertificates")) {
+                    Response.IStatus status = new Response.IStatus() {
+                        @Override
+                        public String getDescription() {
+                            return "444 Device Not Registered";
+                        }
+
+                        @Override
+                        public int getRequestStatus() {
+                            return 444;
+                        }
+                    };
+                    return newFixedLengthResponse(status, NanoHTTPD.MIME_PLAINTEXT,
+                            "device not registered");
+                }
+                Assert.fail("Unexpected HTTP request: " + session.getUri());
+                return null;
+            }
+
+            void consumeRequestBody(HTTPSession session) {
+                try {
+                    session.getInputStream().readNBytes((int) session.getBodySize());
+                } catch (IOException e) {
+                    Assert.fail("Error reading request bytes: " + e.toString());
+                }
+            }
+        };
+        server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+
+        final boolean cleartextPolicy =
+                NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted();
+        NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(true);
+        SettingsManager.setDeviceConfig(sContext, 1 /* extraKeys */, mDuration /* expiringBy */,
+                "http://localhost:" + server.getListeningPort() + "/");
+
+        try (ForceRkpOnlyContext c = new ForceRkpOnlyContext()) {
+            assertPoolStatus(0, 0, 0, 0, mDuration);
+            generateKeyStoreKey("should-never-succeed");
+            Assert.fail("Expected a keystore exception");
+        } catch (ProviderException e) {
+            Assert.assertTrue(e.getCause() instanceof KeyStoreException);
+            KeyStoreException keyStoreException = (KeyStoreException) e.getCause();
+            Assert.assertEquals(ResponseCode.OUT_OF_KEYS, keyStoreException.getErrorCode());
+            Assert.assertFalse(keyStoreException.isTransientFailure());
+            Assert.assertEquals(KeyStoreException.RETRY_NEVER, keyStoreException.getRetryPolicy());
+        } finally {
+            NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(cleartextPolicy);
+            SettingsManager.clearPreferences(sContext);
+            server.stop();
         }
     }
 }
