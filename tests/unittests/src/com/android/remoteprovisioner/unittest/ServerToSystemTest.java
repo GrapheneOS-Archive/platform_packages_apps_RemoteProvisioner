@@ -233,10 +233,10 @@ public class ServerToSystemTest {
                               fallbackKeyCerts2[i].getEncoded());
         }
         assertTrue(provisionedKeyCerts.length > 0);
-        // The root certificates should not match.
-        assertFalse("Provisioned and fallback attestation key root certificates match.",
-                    Arrays.equals(fallbackKeyCerts1[fallbackKeyCerts1.length - 1].getEncoded(),
-                              provisionedKeyCerts[provisionedKeyCerts.length - 1].getEncoded()));
+        // Match against the batch provisioned key, which should be the second entry in the array.
+        assertFalse("Provisioned and fallback attestation key intermediate certificates match.",
+                    Arrays.equals(fallbackKeyCerts1[1].getEncoded(),
+                              provisionedKeyCerts[1].getEncoded()));
     }
 
     @Test
