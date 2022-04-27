@@ -25,6 +25,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import android.content.Context;
 import android.os.ParcelFileDescriptor;
@@ -45,6 +46,7 @@ import androidx.test.runner.AndroidJUnit4;
 
 import com.android.remoteprovisioner.GeekResponse;
 import com.android.remoteprovisioner.Provisioner;
+import com.android.remoteprovisioner.RemoteProvisioningException;
 import com.android.remoteprovisioner.ServerInterface;
 import com.android.remoteprovisioner.SettingsManager;
 
@@ -182,11 +184,13 @@ public class ServerToSystemTest {
         sBinder.generateKeyPair(IS_TEST_MODE, TRUSTED_ENVIRONMENT);
         assertPoolStatus(numTestKeys, 0, 0, 0, mDuration);
         GeekResponse geek = ServerInterface.fetchGeek(sContext);
+        assertEquals(0, SettingsManager.getErrDataBudgetConsumed(sContext));
         assertNotNull(geek);
         int numProvisioned =
                 Provisioner.provisionCerts(numTestKeys, TRUSTED_ENVIRONMENT,
                                            geek.getGeekChain(sCurve), geek.getChallenge(), sBinder,
                                            sContext);
+        assertEquals(0, SettingsManager.getErrDataBudgetConsumed(sContext));
         assertEquals(numTestKeys, numProvisioned);
         assertPoolStatus(numTestKeys, numTestKeys, numTestKeys, 0, mDuration);
         // Certificate duration sent back from the server may change, however ~6 months should be
@@ -237,6 +241,32 @@ public class ServerToSystemTest {
         assertFalse("Provisioned and fallback attestation key intermediate certificates match.",
                     Arrays.equals(fallbackKeyCerts1[1].getEncoded(),
                               provisionedKeyCerts[1].getEncoded()));
+    }
+
+    @Test
+    public void testDataBudgetEmptyFetchGeek() throws Exception {
+        // Check the data budget in order to initialize a rolling window.
+        assertTrue(SettingsManager.hasErrDataBudget(sContext, null /* curTime */));
+        SettingsManager.consumeErrDataBudget(sContext, SettingsManager.FAILURE_DATA_USAGE_MAX);
+        try {
+            ServerInterface.fetchGeek(sContext);
+            fail("Network transaction should not have proceeded.");
+        } catch (RemoteProvisioningException e) {
+            return;
+        }
+    }
+
+    @Test
+    public void testDataBudgetEmptySignCerts() throws Exception {
+        // Check the data budget in order to initialize a rolling window.
+        assertTrue(SettingsManager.hasErrDataBudget(sContext, null /* curTime */));
+        SettingsManager.consumeErrDataBudget(sContext, SettingsManager.FAILURE_DATA_USAGE_MAX);
+        try {
+            ServerInterface.requestSignedCertificates(sContext, null, null);
+            fail("Network transaction should not have proceeded.");
+        } catch (RemoteProvisioningException e) {
+            return;
+        }
     }
 
     @Test
