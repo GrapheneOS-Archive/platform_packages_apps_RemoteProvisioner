@@ -26,6 +26,9 @@ android_app {
         "android.system.keystore2-V1-java",
         "framework-annotations-lib",
     ],
+    optimize: {
+        proguard_flags_files: ["proguard.flags"]
+    },
     static_libs: [
         "android.hardware.security.keymint-V1-java",
         "android.security.remoteprovisioning-java",
