@@ -26,8 +26,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import android.Manifest;
 import android.content.Context;
-import android.os.ParcelFileDescriptor;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.ServiceManager;
 import android.os.SystemProperties;
 import android.security.KeyStoreException;
@@ -38,11 +40,13 @@ import android.security.remoteprovisioning.IRemoteProvisioning;
 import android.security.remoteprovisioning.ImplInfo;
 import android.system.keystore2.ResponseCode;
 import android.util.Base64;
+import android.util.Log;
 
 import androidx.test.core.app.ApplicationProvider;
-import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.runner.AndroidJUnit4;
 
+import com.android.bedstead.nene.TestApis;
+import com.android.bedstead.nene.permissions.PermissionContext;
 import com.android.remoteprovisioner.GeekResponse;
 import com.android.remoteprovisioner.Provisioner;
 import com.android.remoteprovisioner.ServerInterface;
@@ -70,6 +74,7 @@ import fi.iki.elonen.NanoHTTPD;
 @RunWith(AndroidJUnit4.class)
 public class ServerToSystemTest {
 
+    private static final String Tag = "ServerToSystemTest";
     private static final boolean IS_TEST_MODE = false;
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String RKP_ONLY_PROP = "remote_provisioning.tee.rkp_only";
@@ -256,12 +261,29 @@ public class ServerToSystemTest {
         }
     }
 
-    private void setAirplaneMode(boolean isEnabled) throws IOException {
-        String command = "cmd connectivity airplane-mode " + (isEnabled ? "enable" : "disable");
-        ParcelFileDescriptor fd =
-                InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(
-                        command);
-        fd.close();
+    private void setAirplaneMode(boolean enable) throws Exception {
+        ConnectivityManager cm = sContext.getSystemService(ConnectivityManager.class);
+        try (PermissionContext c = TestApis.permissions().withPermission(
+                Manifest.permission.NETWORK_SETTINGS)) {
+            cm.setAirplaneMode(enable);
+
+            // Now wait a "reasonable" time for the network to go down
+            for (int i = 0; i < 100; ++i) {
+                NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+                Log.e(Tag, "Checking active network... " + networkInfo);
+                if (enable) {
+                    if (networkInfo == null || !networkInfo.isConnected()) {
+                        Log.e(Tag, "Successfully disconnected from to the network.");
+                        return;
+                    }
+                } else if (networkInfo != null && networkInfo.isConnected()) {
+                    Log.e(Tag, "Successfully reconnected to the network.");
+                    return;
+                }
+                Thread.sleep(300);
+            }
+        }
+        Assert.fail("Failed to successfully " + (enable ? "enable" : "disable") + " airplane mode");
     }
 
     @Test
