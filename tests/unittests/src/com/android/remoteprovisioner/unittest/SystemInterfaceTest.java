@@ -69,6 +69,8 @@ import java.security.KeyStore;
 import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -197,10 +199,11 @@ public class SystemInterfaceTest {
             for (int j = 0; j < certChain[i].length; j++) {
                 os.write(certChain[i][j].getEncoded());
             }
+            Instant expiringBy = Instant.now().plusMillis(Duration.ofDays(4).toMillis());
             SystemInterface.provisionCertChain(X509Utils.getAndFormatRawPublicKey(certChain[i][0]),
                                                certChain[i][0].getEncoded() /* leafCert */,
                                                os.toByteArray() /* certChain */,
-                                               System.currentTimeMillis() + 25000 /* validity */,
+                                               expiringBy.toEpochMilli() /* validity */,
                                                SecurityLevel.TRUSTED_ENVIRONMENT,
                                                mBinder);
         }
