@@ -32,8 +32,8 @@ import com.android.remoteprovisioner.GeekResponse;
 import com.android.remoteprovisioner.PeriodicProvisioner;
 import com.android.remoteprovisioner.RemoteProvisioningException;
 import com.android.remoteprovisioner.ServerInterface;
+import com.android.remoteprovisioner.SettingsManager;
 
-import java.time.Duration;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -41,7 +41,6 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class GenerateRkpKeyService extends Service {
     private static final int KEY_GENERATION_PAUSE_MS = 1000;
-    private static final Duration LOOKAHEAD_TIME = Duration.ofDays(1);
 
     private static final String SERVICE = "android.security.remoteprovisioning";
     private static final String TAG = "RemoteProvisioningService";
@@ -104,8 +103,10 @@ public class GenerateRkpKeyService extends Service {
 
                 Context context = getApplicationContext();
                 int keysToProvision =
-                        PeriodicProvisioner.generateNumKeysNeeded(binder, context,
-                                LOOKAHEAD_TIME.toMillis(),
+                        PeriodicProvisioner.generateNumKeysNeeded(
+                                binder,
+                                context,
+                                SettingsManager.getExpirationTime(context).toEpochMilli(),
                                 secLevel);
                 if (keysToProvision != 0) {
                     Log.i(TAG, "All signed keys are currently in use, provisioning more.");
