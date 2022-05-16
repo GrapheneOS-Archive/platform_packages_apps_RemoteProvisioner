@@ -22,6 +22,8 @@ android_test {
         "Nene",
         "androidx.test.core",
         "androidx.test.rules",
+        "androidx.work_work-runtime",
+        "androidx.work_work-testing",
         "android.security.remoteprovisioning-java",
         "libnanohttpd",
         "platform-test-annotations",
