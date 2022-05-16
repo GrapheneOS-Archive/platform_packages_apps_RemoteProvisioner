@@ -30,6 +30,8 @@ import android.util.Log;
 
 import com.android.remoteprovisioner.GeekResponse;
 import com.android.remoteprovisioner.PeriodicProvisioner;
+import com.android.remoteprovisioner.ProvisionerMetrics;
+import com.android.remoteprovisioner.ProvisionerMetrics.StopWatch;
 import com.android.remoteprovisioner.RemoteProvisioningException;
 import com.android.remoteprovisioner.ServerInterface;
 import com.android.remoteprovisioner.SettingsManager;
@@ -66,39 +68,58 @@ public class GenerateRkpKeyService extends Service {
         @Override
         public int generateKey(int securityLevel) {
             Log.i(TAG, "generateKey ping for secLevel: " + securityLevel);
-            IRemoteProvisioning binder =
-                    IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
-            return checkAndFillPool(binder, securityLevel, Concurrency.BLOCKING);
+            try (ProvisionerMetrics metrics =
+                         ProvisionerMetrics.createOutOfKeysAttemptMetrics(
+                    getApplicationContext(), securityLevel)) {
+                IRemoteProvisioning binder =
+                        IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
+                return checkAndFillPool(binder, securityLevel, metrics, Concurrency.BLOCKING);
+            }
         }
 
         @Override
         public void notifyKeyGenerated(int securityLevel) {
             Log.i(TAG, "Notify key generated ping for secLevel: " + securityLevel);
-            IRemoteProvisioning binder =
-                    IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
-            checkAndFillPool(binder, securityLevel, Concurrency.NON_BLOCKING);
+            try (ProvisionerMetrics metrics =
+                         ProvisionerMetrics.createKeyConsumedAttemptMetrics(
+                    getApplicationContext(), securityLevel)) {
+                IRemoteProvisioning binder =
+                        IRemoteProvisioning.Stub.asInterface(ServiceManager.getService(SERVICE));
+                checkAndFillPool(binder, securityLevel, metrics, Concurrency.NON_BLOCKING);
+            }
         }
 
         private int checkAndFillPool(IRemoteProvisioning binder, int secLevel,
-                Concurrency concurrency) {
+                ProvisionerMetrics metrics, Concurrency concurrency) {
             // No need to hammer the pool check with a ton of redundant requests.
             if (concurrency == Concurrency.BLOCKING) {
                 Log.i(TAG, "Waiting on lock to check pool status.");
-                sLock.lock();
+                try (StopWatch ignored = metrics.startLockWait()) {
+                    sLock.lock();
+                }
             } else if (!sLock.tryLock()) {
                 Log.i(TAG, "Exiting check; another process already started the check.");
+                metrics.setStatus(ProvisionerMetrics.Status.UNKNOWN);
                 return Status.OK;
             }
             try {
-                AttestationPoolStatus pool =
-                        binder.getPoolStatus(System.currentTimeMillis(), secLevel);
-                ImplInfo[] implInfos = binder.getImplementationInfo();
-                int curve = 0;
+                AttestationPoolStatus pool;
+                ImplInfo[] implInfos;
+                try (StopWatch ignored = metrics.startBinderWait()) {
+                    pool = binder.getPoolStatus(System.currentTimeMillis(), secLevel);
+                    implInfos = binder.getImplementationInfo();
+                }
+                int curve = -1;
                 for (int i = 0; i < implInfos.length; i++) {
                     if (implInfos[i].secLevel == secLevel) {
                         curve = implInfos[i].supportedCurve;
                         break;
                     }
+                }
+                // If curve has not been set, the security level does not have an associated
+                // RKP instance. This should only be possible for StrongBox on S.
+                if (curve == -1) {
+                    metrics.setStatus(ProvisionerMetrics.Status.NO_PROVISIONING_NEEDED);
                 }
 
                 Context context = getApplicationContext();
@@ -107,12 +128,16 @@ public class GenerateRkpKeyService extends Service {
                                 binder,
                                 context,
                                 SettingsManager.getExpirationTime(context).toEpochMilli(),
-                                secLevel);
+                                secLevel,
+                                metrics);
                 if (keysToProvision != 0) {
                     Log.i(TAG, "All signed keys are currently in use, provisioning more.");
-                    GeekResponse resp = ServerInterface.fetchGeek(context);
+                    GeekResponse resp = ServerInterface.fetchGeek(context, metrics);
                     PeriodicProvisioner.batchProvision(binder, context, keysToProvision, secLevel,
-                            resp.getGeekChain(curve), resp.getChallenge());
+                            resp.getGeekChain(curve), resp.getChallenge(), metrics);
+                    metrics.setStatus(ProvisionerMetrics.Status.KEYS_SUCCESSFULLY_PROVISIONED);
+                } else {
+                    metrics.setStatus(ProvisionerMetrics.Status.NO_PROVISIONING_NEEDED);
                 }
             } catch (InterruptedException e) {
                 Log.e(TAG, "Provisioner thread interrupted.", e);
