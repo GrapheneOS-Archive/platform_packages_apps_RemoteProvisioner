@@ -58,11 +58,10 @@ public class ServerInterface {
      *                    chain for one attestation key pair.
      */
     public static List<byte[]> requestSignedCertificates(Context context, byte[] csr,
-                                                         byte[] challenge) throws
-            RemoteProvisioningException {
-        checkDataBudget(context);
+            byte[] challenge, ProvisionerMetrics metrics) throws RemoteProvisioningException {
+        checkDataBudget(context, metrics);
         int bytesTransacted = 0;
-        try {
+        try (ProvisionerMetrics.StopWatch serverWaitTimer = metrics.startServerWait()) {
             URL url = new URL(SettingsManager.getUrl(context) + CERTIFICATE_SIGNING_URL
                               + Base64.encodeToString(challenge, Base64.URL_SAFE));
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
@@ -78,31 +77,45 @@ public class ServerInterface {
                 bytesTransacted += csr.length;
             }
 
+            metrics.setHttpStatusError(con.getResponseCode());
             if (con.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                serverWaitTimer.stop();
                 int failures = SettingsManager.incrementFailureCounter(context);
                 Log.e(TAG, "Server connection for signing failed, response code: "
                         + con.getResponseCode() + "\nRepeated failure count: " + failures);
                 SettingsManager.consumeErrDataBudget(context, bytesTransacted);
-                throw RemoteProvisioningException.createFromHttpError(con.getResponseCode());
+                RemoteProvisioningException ex =
+                        RemoteProvisioningException.createFromHttpError(con.getResponseCode());
+                if (ex.getErrorCode() == IGenerateRkpKeyService.Status.DEVICE_NOT_REGISTERED) {
+                    metrics.setStatus(ProvisionerMetrics.Status.SIGN_CERTS_DEVICE_NOT_REGISTERED);
+                } else {
+                    metrics.setStatus(ProvisionerMetrics.Status.SIGN_CERTS_HTTP_ERROR);
+                }
+                throw ex;
             }
+            serverWaitTimer.stop();
             SettingsManager.clearFailureCounter(context);
             BufferedInputStream inputStream = new BufferedInputStream(con.getInputStream());
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
             int read = 0;
+            serverWaitTimer.start();
             while ((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
                 cborBytes.write(buffer, 0, read);
                 bytesTransacted += read;
             }
+            serverWaitTimer.stop();
             return CborUtils.parseSignedCertificates(cborBytes.toByteArray());
         } catch (SocketTimeoutException e) {
             Log.e(TAG, "Server timed out", e);
+            metrics.setStatus(ProvisionerMetrics.Status.SIGN_CERTS_TIMED_OUT);
         } catch (IOException e) {
             Log.e(TAG, "Failed to request signed certificates from the server", e);
+            metrics.setStatus(ProvisionerMetrics.Status.SIGN_CERTS_IO_EXCEPTION);
         }
         SettingsManager.incrementFailureCounter(context);
         SettingsManager.consumeErrDataBudget(context, bytesTransacted);
-        throw makeNetworkError(context, "Error getting CSR signed.");
+        throw makeNetworkError(context, "Error getting CSR signed.", metrics);
     }
 
     /**
@@ -115,45 +128,54 @@ public class ServerInterface {
      * request to get keys signed.
      *
      * @param context The application context which is required to use SettingsManager.
+     * @param metrics
      * @return A GeekResponse object which optionally contains configuration data.
      */
-    public static GeekResponse fetchGeek(Context context) throws RemoteProvisioningException {
-        checkDataBudget(context);
+    public static GeekResponse fetchGeek(Context context,
+            ProvisionerMetrics metrics) throws RemoteProvisioningException {
+        checkDataBudget(context, metrics);
         int bytesTransacted = 0;
         try {
             URL url = new URL(SettingsManager.getUrl(context) + GEEK_URL);
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
-            con.setRequestMethod("POST");
-            con.setConnectTimeout(TIMEOUT_MS);
-            con.setReadTimeout(TIMEOUT_MS);
-            con.setDoOutput(true);
-
-            byte[] config = CborUtils.buildProvisioningInfo(context);
-            try (OutputStream os = con.getOutputStream()) {
-                os.write(config, 0, config.length);
-                bytesTransacted += config.length;
-            }
-
-            if (con.getResponseCode() != HttpURLConnection.HTTP_OK) {
-                int failures = SettingsManager.incrementFailureCounter(context);
-                Log.e(TAG, "Server connection for GEEK failed, response code: "
-                        + con.getResponseCode() + "\nRepeated failure count: " + failures);
-                SettingsManager.consumeErrDataBudget(context, bytesTransacted);
-                throw RemoteProvisioningException.createFromHttpError(con.getResponseCode());
-            }
-            SettingsManager.clearFailureCounter(context);
-
-            BufferedInputStream inputStream = new BufferedInputStream(con.getInputStream());
             ByteArrayOutputStream cborBytes = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int read = 0;
-            while ((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
-                cborBytes.write(buffer, 0, read);
-                bytesTransacted += read;
+            try (ProvisionerMetrics.StopWatch serverWaitTimer = metrics.startServerWait()) {
+                HttpURLConnection con = (HttpURLConnection) url.openConnection();
+                con.setRequestMethod("POST");
+                con.setConnectTimeout(TIMEOUT_MS);
+                con.setReadTimeout(TIMEOUT_MS);
+                con.setDoOutput(true);
+
+                byte[] config = CborUtils.buildProvisioningInfo(context);
+                try (OutputStream os = con.getOutputStream()) {
+                    os.write(config, 0, config.length);
+                    bytesTransacted += config.length;
+                }
+
+                metrics.setHttpStatusError(con.getResponseCode());
+                if (con.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                    serverWaitTimer.stop();
+                    int failures = SettingsManager.incrementFailureCounter(context);
+                    Log.e(TAG, "Server connection for GEEK failed, response code: "
+                            + con.getResponseCode() + "\nRepeated failure count: " + failures);
+                    SettingsManager.consumeErrDataBudget(context, bytesTransacted);
+                    metrics.setStatus(ProvisionerMetrics.Status.FETCH_GEEK_HTTP_ERROR);
+                    throw RemoteProvisioningException.createFromHttpError(con.getResponseCode());
+                }
+                serverWaitTimer.stop();
+                SettingsManager.clearFailureCounter(context);
+                BufferedInputStream inputStream = new BufferedInputStream(con.getInputStream());
+                byte[] buffer = new byte[1024];
+                int read = 0;
+                serverWaitTimer.start();
+                while ((read = inputStream.read(buffer, 0, buffer.length)) != -1) {
+                    cborBytes.write(buffer, 0, read);
+                    bytesTransacted += read;
+                }
+                inputStream.close();
             }
-            inputStream.close();
             GeekResponse resp = CborUtils.parseGeekResponse(cborBytes.toByteArray());
             if (resp == null) {
+                metrics.setStatus(ProvisionerMetrics.Status.FETCH_GEEK_HTTP_ERROR);
                 throw new RemoteProvisioningException(
                         IGenerateRkpKeyService.Status.HTTP_SERVER_ERROR,
                         "Response failed to parse.");
@@ -161,31 +183,37 @@ public class ServerInterface {
             return resp;
         } catch (SocketTimeoutException e) {
             Log.e(TAG, "Server timed out", e);
+            metrics.setStatus(ProvisionerMetrics.Status.FETCH_GEEK_TIMED_OUT);
         } catch (IOException e) {
             // This exception will trigger on a completely malformed URL.
             Log.e(TAG, "Failed to fetch GEEK from the servers.", e);
+            metrics.setStatus(ProvisionerMetrics.Status.FETCH_GEEK_IO_EXCEPTION);
         }
         SettingsManager.incrementFailureCounter(context);
         SettingsManager.consumeErrDataBudget(context, bytesTransacted);
-        throw makeNetworkError(context, "Error fetching GEEK");
+        throw makeNetworkError(context, "Error fetching GEEK", metrics);
     }
 
-    private static void checkDataBudget(Context context) throws RemoteProvisioningException {
+    private static void checkDataBudget(Context context, ProvisionerMetrics metrics)
+            throws RemoteProvisioningException {
         if (!SettingsManager.hasErrDataBudget(context, null /* curTime */)) {
+            metrics.setStatus(ProvisionerMetrics.Status.OUT_OF_ERROR_BUDGET);
             int bytesConsumed = SettingsManager.getErrDataBudgetConsumed(context);
             throw makeNetworkError(context,
                     "Out of data budget due to repeated errors. Consumed "
-                    + bytesConsumed + " bytes.");
+                    + bytesConsumed + " bytes.", metrics);
         }
     }
 
-    private static RemoteProvisioningException makeNetworkError(Context context, String message) {
+    private static RemoteProvisioningException makeNetworkError(Context context, String message,
+            ProvisionerMetrics metrics) {
         ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
         NetworkInfo networkInfo = cm.getActiveNetworkInfo();
         if (networkInfo != null && networkInfo.isConnected()) {
             return new RemoteProvisioningException(
                     IGenerateRkpKeyService.Status.NETWORK_COMMUNICATION_ERROR, message);
         }
+        metrics.setStatus(ProvisionerMetrics.Status.NO_NETWORK_CONNECTIVITY);
         return new RemoteProvisioningException(
                 IGenerateRkpKeyService.Status.NO_NETWORK_CONNECTIVITY, message);
     }
