@@ -31,6 +31,7 @@ import android.util.Log;
 import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.NetworkType;
+import androidx.work.OneTimeWorkRequest;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 
@@ -79,7 +80,17 @@ public class BootReceiver extends BroadcastReceiver {
                 .enqueueUniquePeriodicWork("ProvisioningJob",
                                        ExistingPeriodicWorkPolicy.REPLACE, // Replace on reboot.
                                        workRequest);
+        if (WidevineProvisioner.isWidevineProvisioningNeeded()) {
+            Log.i(TAG, "WV provisioning needed. Queueing a one-time provisioning job.");
+            OneTimeWorkRequest wvRequest =
+                    new OneTimeWorkRequest.Builder(WidevineProvisioner.class)
+                            .setConstraints(constraints)
+                            .build();
+            WorkManager.getInstance(context).enqueue(wvRequest);
+        }
     }
+
+
 
     private int calcNumPotentialKeysToDownload() {
         try {
