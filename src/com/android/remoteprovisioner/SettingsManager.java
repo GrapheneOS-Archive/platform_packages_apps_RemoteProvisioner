@@ -18,6 +18,8 @@ package com.android.remoteprovisioner;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.ext.settings.ExtSettings;
+import android.ext.settings.RemoteProvisioningConstants;
 import android.util.Log;
 
 import java.time.Duration;
@@ -224,6 +226,10 @@ public class SettingsManager {
      * servers.
      */
     public static String getUrl(Context context) {
+        if (shouldUseGrapheneOsServer(context)) {
+            return RemoteProvisioningConstants.GRAPHENEOS_PROXY_URL;
+        }
+
         SharedPreferences sharedPref =
                 context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
         return sharedPref.getString(KEY_URL, URL_DEFAULT);
@@ -285,5 +291,9 @@ public class SettingsManager {
      */
     public static boolean isTestMode() {
         return IS_TEST_MODE;
+    }
+
+    private static boolean shouldUseGrapheneOsServer(Context ctx) {
+        return ExtSettings.REMOTE_PROVISIONING_SERVER.get(ctx) == RemoteProvisioningConstants.GRAPHENEOS_PROXY;
     }
 }
